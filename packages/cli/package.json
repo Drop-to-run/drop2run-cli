@@ -1,9 +1,8 @@
 {
 	"name": "drop2run",
 	"version": "0.0.0",
-	"private": true,
 	"description": "Publish a static site to Drop2Run from the command line.",
-	"license": "UNLICENSED",
+	"license": "MIT",
 	"type": "module",
 	"bin": {
 		"drop2run": "bin/drop2run.mjs"
