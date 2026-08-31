@@ -1,5 +1,5 @@
-import { isDocumentPath } from "./limits";
-import type { DroppedFile } from "./types";
+import { isDocumentPath } from "./limits.js";
+import type { DroppedFile } from "./types.js";
 
 /**
  * What was dropped, described well enough to be shown to a person before anything is uploaded.

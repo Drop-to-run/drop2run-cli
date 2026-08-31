@@ -1,9 +1,10 @@
 /**
  * Types shared across the deploy pipeline.
  *
- * ⚠️ Nothing in `pipeline/` may import React. Two reasons, both real constraints rather than style:
- * the pipeline runs inside a Web Worker because hashing and unzipping a large drop on the main thread
- * freezes the UI completely, and Phase 3 reuses this whole directory for the CLI.
+ * ⚠️ Nothing in this package may import React, or anything else that assumes a browser. Two reasons,
+ * both real constraints rather than style: it runs inside a Web Worker, because hashing and unzipping a
+ * large drop on the main thread freezes the UI completely; and the CLI and the MCP server import it
+ * directly. Enforced by `apps/web/test/isolation.test.ts`.
  */
 
 /** Progress reported to the caller as a deploy moves through its stages. */

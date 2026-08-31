@@ -1,4 +1,4 @@
-import type { CollectedFile } from "./types";
+import type { CollectedFile } from "./types.js";
 
 /**
  * Reads a display name for a site out of the `index.html` it was published from.
@@ -125,14 +125,60 @@ function nameFromHtml(html: string): string | null {
  * @param html The document text.
  * @returns The parsed document, or null when the runtime cannot parse one.
  */
-function parse(html: string): Document | null {
-	if (typeof DOMParser === "undefined") return null;
+function parse(html: string): ParsedDocument | null {
+	const parser = (globalThis as { DOMParser?: new () => DomParserLike }).DOMParser;
+	if (parser === undefined) return null;
 
 	try {
-		return new DOMParser().parseFromString(html, "text/html");
+		return new parser().parseFromString(html, "text/html");
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * The three calls this file makes against a parsed document, and nothing more.
+ *
+ * <b>Why the shape is declared here rather than taken from the DOM library.</b> This package must
+ * typecheck without `lib: ["DOM"]`, because the CLI and the MCP server compile against node and
+ * loading the DOM types there would let a real browser API slip in and typecheck cleanly — the one
+ * mistake the split exists to prevent. Naming the two methods it actually uses keeps the runtime
+ * behaviour identical and states the dependency exactly.
+ */
+interface ParsedDocument {
+	/**
+	 * Finds the first matching element.
+	 *
+	 * @param selector CSS selector.
+	 * @returns The element, or null.
+	 */
+	querySelector(selector: string): ParsedElement | null;
+}
+
+/** The parts of an element this file reads. */
+interface ParsedElement {
+	/** Its text, or null. */
+	readonly textContent: string | null;
+
+	/**
+	 * Reads an attribute.
+	 *
+	 * @param name Attribute name.
+	 * @returns Its value, or null.
+	 */
+	getAttribute(name: string): string | null;
+}
+
+/** The one method of `DOMParser` this file calls. */
+interface DomParserLike {
+	/**
+	 * Parses a document.
+	 *
+	 * @param html The document text.
+	 * @param type MIME type, always `text/html` here.
+	 * @returns The parsed document.
+	 */
+	parseFromString(html: string, type: string): ParsedDocument;
 }
 
 /**

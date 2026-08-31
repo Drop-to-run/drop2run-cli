@@ -1,4 +1,4 @@
-import { ClientErrorCode, DeployError, type ManifestFile } from "./types";
+import { ClientErrorCode, DeployError, type ManifestFile } from "./types.js";
 
 /**
  * The pre-upload check.

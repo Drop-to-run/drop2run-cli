@@ -1,4 +1,4 @@
-import type { CollectedFile, ManifestFile } from "./types";
+import type { CollectedFile, ManifestFile } from "./types.js";
 
 /**
  * Content hashing. The API rejects a manifest whose checksums are not lowercase hex SHA-256, and

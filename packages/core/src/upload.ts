@@ -1,4 +1,4 @@
-import { ClientErrorCode, DeployError, type ManifestFile } from "./types";
+import { ClientErrorCode, DeployError, type ManifestFile } from "./types.js";
 
 /**
  * Uploads files straight to R2 through presigned URLs.

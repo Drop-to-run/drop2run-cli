@@ -1,5 +1,5 @@
-import { DeployError, type ManifestFile } from "./types";
-import type { UploadTarget } from "./upload";
+import { DeployError, type ManifestFile } from "./types.js";
+import type { UploadTarget } from "./upload.js";
 
 /**
  * The two control-plane calls a deploy makes.
@@ -64,6 +64,19 @@ export interface ApiOptions {
 	readonly baseUrl?: string;
 	/** Claim token, for a site that has no owner yet. */
 	readonly claimToken?: string;
+	/**
+	 * Personal access token, for a caller with no browser session.
+	 *
+	 * <b>Reaches the control plane and nothing else.</b> It is attached in {@link request} only, never by
+	 * {@link uploadAll} — those PUTs go to presigned storage URLs on another host, which need no
+	 * credential of ours and must not be handed one. The devtools brief calls this out as its second
+	 * risk: this token speaks for a whole account, so every place it is sent is a place it can leak
+	 * from.
+	 *
+	 * A browser leaves this unset and authenticates with its cookie, which is why nothing in apps/web
+	 * passes it.
+	 */
+	readonly token?: string;
 	/** Overridable for tests. Defaults to the global `fetch`. */
 	readonly fetch?: typeof fetch;
 }
@@ -153,6 +166,7 @@ async function request<T>(
 	const headers: Record<string, string> = {};
 	if (body !== undefined) headers["Content-Type"] = "application/json";
 	if (options.claimToken) headers[CLAIM_TOKEN_HEADER] = options.claimToken;
+	if (options.token) headers.Authorization = `Bearer ${options.token}`;
 
 	const response = await doFetch(`${base}/${path}`, {
 		method: "POST",

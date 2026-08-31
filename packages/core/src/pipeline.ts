@@ -1,9 +1,9 @@
-import { type ApiOptions, completeDeploy, prepareDeploy } from "./api";
-import { hashAll } from "./hash";
-import { checkLimits, type PlanLimits } from "./limits";
-import { suggestSiteName } from "./title";
-import type { CollectedFile, ProgressListener } from "./types";
-import { asDeployError, type UploadDeps, uploadAll } from "./upload";
+import { type ApiOptions, completeDeploy, prepareDeploy } from "./api.js";
+import { hashAll } from "./hash.js";
+import { checkLimits, type PlanLimits } from "./limits.js";
+import { suggestSiteName } from "./title.js";
+import type { CollectedFile, ProgressListener } from "./types.js";
+import { asDeployError, type UploadDeps, uploadAll } from "./upload.js";
 
 /**
  * Orchestrates one deploy, from a set of files to a live URL.

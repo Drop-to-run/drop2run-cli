@@ -12,8 +12,9 @@ export {
 	completeDeploy,
 	type PrepareResponse,
 	prepareDeploy,
-} from "./api";
-export { hashAll, sha256Hex } from "./hash";
+} from "./api.js";
+export { hashAll, sha256Hex } from "./hash.js";
+export { shouldIgnore } from "./ignore.js";
 export {
 	checkLimits,
 	formatBytes,
@@ -22,16 +23,16 @@ export {
 	type PlanLimits,
 	shouldWarnAboutSize,
 	totalBytes,
-} from "./limits";
-export { type DeployOptions, type DeploySource, deploy } from "./pipeline";
+} from "./limits.js";
+export { type DeployOptions, type DeploySource, deploy } from "./pipeline.js";
 export {
 	type ArchiveSummary,
 	type DropSummary,
 	type FolderSummary,
 	type SummaryEntry,
 	summarise,
-} from "./summary";
-export { MAX_NAME_LENGTH, suggestSiteName } from "./title";
+} from "./summary.js";
+export { MAX_NAME_LENGTH, suggestSiteName } from "./title.js";
 export {
 	ClientErrorCode,
 	type CollectedFile,
@@ -40,11 +41,11 @@ export {
 	type ManifestFile,
 	type ProgressEvent,
 	type ProgressListener,
-} from "./types";
+} from "./types.js";
 export {
 	asDeployError,
 	cancelled,
 	isAbort,
 	type UploadTarget,
 	uploadAll,
-} from "./upload";
+} from "./upload.js";
