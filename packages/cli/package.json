@@ -1,0 +1,19 @@
+{
+	"name": "drop2run",
+	"version": "0.0.0",
+	"description": "Deploy a static site to Drop2Run from the command line. Placeholder — not released yet.",
+	"license": "UNLICENSED",
+	"type": "module",
+	"bin": {
+		"drop2run": "bin/drop2run.mjs"
+	},
+	"files": ["bin"],
+	"engines": {
+		"node": ">=20"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"homepage": "https://dropto.run",
+	"keywords": ["static-site", "deploy", "hosting", "cli"]
+}
