@@ -1,0 +1,13 @@
+{
+	"name": "@drop2run/core",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "The deploy engine: manifest, hashing, upload and go-live, with no browser in it.",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"files": [
+		"src"
+	]
+}
