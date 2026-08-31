@@ -62,13 +62,15 @@ file uploads are PUTs to presigned URLs on another host, which need nothing from
 there would be an account credential handed to a service that never asked. There is a test for it,
 because it is the kind of thing a later refactor tidies into a shared header helper.
 
-## Why it cannot be published yet
+## Why it is not published yet
 
-`dist/index.js` is a bundle rather than a compiled tree, and that is what makes publishing possible at
-all: `@drop2run/core` is resolved by a build alias, not installed, so the engine is folded into the
-output. What is still missing is the decision recorded in `packages/contracts/README.md` — the workspace
-or `file:` dependency that would make core a real package. Until then this package is honest inside this
-repository and would be a lie on a registry, so `private: true` stays.
+`private: true`, and the earlier reason given here was wrong. It said the package could not be published
+because `@drop2run/core` is not installed — but `dist/index.js` is a bundle, and the build folds the
+engine in, so the tarball has no import pointing at anything npm cannot fetch. The alias is a fact about
+the build, not a promise the package fails to keep.
+
+What is actually missing is a decision to release. Nothing here has been used by anybody yet, and the
+first version number is spent permanently the moment it is published.
 
 The real dependencies — the MCP SDK and zod — stay external and are installed by npm. Inlining an SDK
 would mean shipping a copy that never gets a security update.

@@ -83,8 +83,11 @@ export function loadCredentials(
 /**
  * What to tell somebody whose server has no token.
  *
- * Written once and returned by every tool, so the instructions cannot drift between them — and phrased
- * as the two steps that fix it rather than as a description of the fault.
+ * Written once and returned by every command and every tool, so the instructions cannot drift between
+ * them — and phrased as the two steps that fix it rather than as a description of the fault.
+ *
+ * Deliberately says nothing about being a server or a command line: both read it, and wording that
+ * named one of them would be wrong half the time it is shown.
  *
  * @returns The message shown in the chat.
  */
@@ -93,7 +96,7 @@ export function missingCredentialsMessage(): string {
 		"No Drop2Run access token.",
 		"",
 		"Create one at https://dropto.run/account/tokens, then either:",
-		`  - set ${TOKEN_VARIABLE} in this server's environment, or`,
+		`  - set ${TOKEN_VARIABLE} in the environment, or`,
 		`  - put it in ${configPath()} as {"token": "d2r_..."}`,
 		"",
 		"The token is shown once when it is created and cannot be recovered afterwards.",

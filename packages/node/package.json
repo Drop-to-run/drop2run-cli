@@ -1,32 +1,19 @@
 {
-	"name": "drop2run",
+	"name": "@drop2run/node",
 	"version": "0.0.0",
 	"private": true,
-	"description": "Publish a static site to Drop2Run from the command line.",
-	"license": "UNLICENSED",
 	"type": "module",
-	"bin": {
-		"drop2run": "bin/drop2run.mjs"
+	"description": "Config, credentials and a filesystem source: the parts that need a machine.",
+	"exports": {
+		".": "./src/index.ts"
 	},
 	"files": [
-		"bin",
-		"dist"
+		"src"
 	],
 	"engines": {
 		"node": ">=20"
 	},
-	"publishConfig": {
-		"access": "public"
-	},
-	"homepage": "https://dropto.run",
-	"keywords": [
-		"static-site",
-		"deploy",
-		"hosting",
-		"cli"
-	],
 	"scripts": {
-		"build": "vite build",
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run",
 		"lint": "biome check .",
@@ -36,7 +23,6 @@
 		"@biomejs/biome": "^2.5.11",
 		"@types/node": "^26.4.0",
 		"typescript": "^5.9.3",
-		"vite": "^7.2.1",
 		"vitest": "^4.1.11"
 	}
 }

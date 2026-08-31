@@ -12,13 +12,8 @@
 		"noUnusedLocals": true,
 		"noUnusedParameters": true,
 		"skipLibCheck": true,
-		"outDir": "dist",
-		"declaration": true,
 		"noEmit": true,
-		"paths": {
-			"@drop2run/core": ["../core/src/index.ts"],
-			"@drop2run/node": ["../node/src/index.ts"]
-		}
+		"paths": { "@drop2run/core": ["../core/src/index.ts"] }
 	},
 	"include": ["src", "test"]
 }

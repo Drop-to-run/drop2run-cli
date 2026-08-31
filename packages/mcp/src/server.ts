@@ -1,8 +1,14 @@
+import {
+	type Credentials,
+	listSites,
+	loadCredentials,
+	missingCredentialsMessage,
+	type PublishResult,
+	publishDirectory,
+	publishHtml,
+} from "@drop2run/node";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { listSites } from "./api.js";
-import { type Credentials, loadCredentials, missingCredentialsMessage } from "./config.js";
-import { type PublishResult, publishDirectory, publishHtml } from "./publish.js";
 
 /**
  * The MCP surface: three tools, and the rule that none of them can be reached without a token.

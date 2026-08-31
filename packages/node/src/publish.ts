@@ -6,8 +6,8 @@ import { directorySource } from "./source.js";
 /**
  * One publish, from a folder or a single page to a live URL.
  *
- * Sits between the MCP tools and the engine, and exists to hold the one decision the tools would
- * otherwise each make differently: which site a publish goes to.
+ * Sits between a command — an MCP tool or a CLI subcommand — and the engine, and exists to hold the
+ * one decision each of them would otherwise make differently: which site a publish goes to.
  */
 
 /** What a publish reports back to the chat. */

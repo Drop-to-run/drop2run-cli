@@ -9,7 +9,6 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			"@drop2run/core": fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
-			"@drop2run/node": fileURLToPath(new URL("../node/src/index.ts", import.meta.url)),
 		},
 	},
 	test: {

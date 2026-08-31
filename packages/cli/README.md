@@ -1,31 +1,62 @@
 # drop2run
 
-Command-line deploys for [Drop2Run](https://dropto.run). **Not released yet** — this package currently
-holds the name and nothing else.
+Publish a static site to [Drop2Run](https://dropto.run) from the command line.
 
-Publishing a site today means dropping a folder at <https://dropto.run>. The CLI is P2 of
-`docs/briefs/DEVTOOLS-BRIEF.md`; its planned surface is in §5 of that file.
-
-## Why a placeholder was published
-
-Creating the npm organisations reserved the `@drop2run` **scope**. It did not reserve the unscoped name,
-which was measured rather than assumed — `registry.npmjs.org/drop2run` answered 404 with all three orgs
-already in place. npm documents that an org name cannot collide with an existing package, but the
-direction that matters here is the opposite one, and it is not answerable from outside. §5 wants
-`npm i -g drop2run` to work, and the only thing that certainly reserves an unscoped name is a publish.
-
-## Before publishing anything from here
-
-```bash
-npm pack --dry-run
+```
+drop2run deploy [dir] [--site <subdomain>]   Publish a folder (default: .)
+drop2run ls                                  List your sites
+drop2run whoami                              Check the token and whose it is
+drop2run where                               Show which token source is in use
 ```
 
-Read the file list it prints. `files` is a whitelist (`["bin"]`) rather than an `.npmignore` blacklist,
-so the tarball should contain the bin script, this README and `package.json` — nothing from `apps/`,
-`docs/` or `.claude/`. Publishing a repository private is fine; publishing the wrong files out of it is
-not undoable.
+`--json` on any command prints machine-readable output instead of text.
 
-⚠️ **A published version is burned permanently.** `npm unpublish` has a 72-hour window and conditions,
-and the number cannot be reused even after a successful unpublish. `0.0.0` is deliberately the number
-nobody would want for a release. Do not bump it to ship the real CLI — that release picks its own first
-version.
+## Signing in
+
+**There is no `drop2run login` yet.** It needs endpoints the API does not have — the loopback PKCE flow
+in §4 of `docs/briefs/DEVTOOLS-BRIEF.md` — and a `login` that printed "not implemented" would be worse
+than none, so the command does not exist rather than existing and lying.
+
+Until then, create a token at <https://dropto.run/account/tokens> and either set it in the environment:
+
+```
+DROP2RUN_TOKEN=d2r_...
+```
+
+or put it in `~/.config/drop2run/config.json`:
+
+```json
+{ "token": "d2r_..." }
+```
+
+The environment wins. That is the same file and the same precedence `@drop2run/mcp` uses, so signing in
+once covers both.
+
+`drop2run where` says which source is in force without ever printing the token. That is deliberate: the
+output of a command line ends up in issue reports, terminal recordings and CI logs, and "why is it using
+the wrong account" is answerable without showing the secret.
+
+## What `token create` is not
+
+The brief's §5 lists `token create|list|revoke`. **Create and revoke cannot exist here**, and that is a
+decision rather than an omission: a token that can mint tokens is not a leaked credential but a permanent
+one — whoever takes it makes a second, and revoking the first changes nothing because the replacement is
+one the owner never made and will not recognise. Both endpoints require a browser session. `gh` and
+`vercel` draw the line in the same place.
+
+## Not published yet
+
+`private: true`, because P2 is not finished: without `login` this is a tool that installs and then asks
+you to go and paste a token by hand. The npm name `drop2run` is still unheld — a known risk, recorded in
+§8 of the brief.
+
+The bundle itself would work. `@drop2run/core` and `@drop2run/node` are resolved by build aliases rather
+than installed, and `vite build` folds both into `dist/index.js`, so the tarball has no import pointing
+at something npm cannot fetch. What is missing is a reason to release, not a way to.
+
+## Running it from a checkout
+
+```bash
+cd packages/cli && npm run build
+node bin/drop2run.mjs --help
+```
