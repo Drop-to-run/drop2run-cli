@@ -3,6 +3,8 @@
 Publish a static site to [Drop2Run](https://dropto.run) from the command line.
 
 ```
+drop2run login                               Sign in through a browser and store a token
+drop2run logout                              Remove the stored token
 drop2run deploy [dir] [--site <subdomain>]   Publish a folder (default: .)
 drop2run ls                                  List your sites
 drop2run whoami                              Check the token and whose it is
@@ -13,11 +15,23 @@ drop2run where                               Show which token source is in use
 
 ## Signing in
 
-**There is no `drop2run login` yet.** It needs endpoints the API does not have — the loopback PKCE flow
-in §4 of `docs/briefs/DEVTOOLS-BRIEF.md` — and a `login` that printed "not implemented" would be worse
-than none, so the command does not exist rather than existing and lying.
+`drop2run login` opens a browser, waits on `127.0.0.1`, and stores the token it is handed in
+`~/.config/drop2run/config.json` with mode `0600`.
 
-Until then, create a token at <https://dropto.run/account/tokens> and either set it in the environment:
+Three things about it are worth knowing, because they decide when it will not work:
+
+- **It needs a browser and loopback on the same machine.** The token is delivered by a redirect to a
+  temporary server this process opens on `127.0.0.1`, which is what keeps it out of clipboards and
+  scrollback. A remote shell whose browser is on another machine cannot complete that redirect.
+- **It uses PKCE, so there is no client secret.** A verifier is generated per sign-in and never leaves the
+  process; only its SHA-256 travels through the browser. A code intercepted anywhere along the way cannot
+  be exchanged without the verifier.
+- **There is no `--device` yet.** The device-code flow from §4 of `docs/briefs/DEVTOOLS-BRIEF.md` is the
+  next slice, and it is the one that covers SSH, dev containers and WSL. The flag is deliberately absent
+  rather than present and failing.
+
+For CI, or where `login` cannot work, create a token at <https://dropto.run/account/tokens> and either set
+it in the environment:
 
 ```
 DROP2RUN_TOKEN=d2r_...
@@ -44,15 +58,19 @@ one — whoever takes it makes a second, and revoking the first changes nothing 
 one the owner never made and will not recognise. Both endpoints require a browser session. `gh` and
 `vercel` draw the line in the same place.
 
-## Not published yet
+## Releasing
 
-`private: true`, because P2 is not finished: without `login` this is a tool that installs and then asks
-you to go and paste a token by hand. The npm name `drop2run` is still unheld — a known risk, recorded in
-§8 of the brief.
+`0.0.0` is on npm, published to hold the bare name `drop2run` (brief §9.1). It is not a release: the
+version says so, and what was on the registry at that point had no `login` at all.
 
-The bundle itself would work. `@drop2run/core` and `@drop2run/node` are resolved by build aliases rather
-than installed, and `vite build` folds both into `dist/index.js`, so the tarball has no import pointing
-at something npm cannot fetch. What is missing is a reason to release, not a way to.
+`login` closes the reason there was nothing worth releasing. What still stands between here and a real
+version is the release mechanics rather than the code — `npm pack --dry-run` on every publish, changesets
+across `core` → `node` → `cli`, provenance, and a licence field on `core`, `node` and `mcp`, none of which
+declare one. Brief §9.3 has the list and why each item is on it.
+
+The bundle itself works. `@drop2run/core` and `@drop2run/node` are resolved by build aliases rather than
+installed, and `vite build` folds both into `dist/index.js`, so the tarball has no import pointing at
+something npm cannot fetch.
 
 ## Running it from a checkout
 

@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 /**
  * Where the access token comes from, and what happens when there is none.
@@ -81,6 +81,118 @@ export function loadCredentials(
 }
 
 /**
+ * The API base URL to use when no token has been stored yet.
+ *
+ * Needed by sign-in specifically: every other call reads the base URL off the credentials, and sign-in is
+ * the one that runs when there are none. The precedence is the same as {@link loadCredentials} minus the
+ * token, so pointing a shell at a local API signs in against that API rather than production.
+ *
+ * @param env Environment to read, injectable so a test does not have to mutate the real one.
+ * @param read Reads a file, injectable for the same reason.
+ * @returns The base URL, ending without a slash.
+ */
+export function resolveApiBaseUrl(
+	env: NodeJS.ProcessEnv = process.env,
+	read: (path: string) => string = (path) => readFileSync(path, "utf8"),
+): string {
+	let stored: StoredConfig = {};
+	try {
+		stored = JSON.parse(read(configPath())) as StoredConfig;
+	} catch {
+		// No file, unreadable, or not JSON — all three mean "use the default".
+	}
+
+	const url = env.DROP2RUN_API_URL?.trim() || stored.apiBaseUrl?.trim() || DEFAULT_API_BASE_URL;
+
+	return url.replace(/\/+$/, "");
+}
+
+/**
+ * The dashboard origin that goes with an API base URL.
+ *
+ * Derived rather than configured separately, because the two are the same deployment and a second setting
+ * is a second thing to get wrong: somebody who points the API at a local instance and then opens a consent
+ * page on production has signed a local command line in against the wrong account, which is confusing in
+ * exactly the way credentials should not be.
+ *
+ * The API lives under `/api` on the dashboard origin (see plan §4), so this is that path removed.
+ *
+ * @param apiBaseUrl The API base URL.
+ * @returns The origin the browser should be sent to.
+ */
+export function dashboardUrlFor(apiBaseUrl: string): string {
+	return apiBaseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
+}
+
+/**
+ * Writes the token to the config file, creating the directory if it has to.
+ *
+ * <b>Everything else in the file is preserved.</b> It is hand-edited — that was the only way to get a
+ * token before sign-in existed — so it may hold an `apiBaseUrl` somebody set deliberately. A write that
+ * replaced the whole file would silently point the next command at production.
+ *
+ * <b>Written through a temporary file and renamed.</b> A truncated write leaves somebody with a config
+ * that parses as nothing, which reads as "signed out" right after a successful sign-in. The mode is set
+ * on the temporary file before the rename, so the token is never briefly world-readable.
+ *
+ * @param token The plaintext token to store.
+ * @param path Where to write, injectable so a test does not touch a real home directory.
+ * @returns The path written to.
+ */
+export function saveToken(token: string, path: string = configPath()): string {
+	let existing: StoredConfig = {};
+	try {
+		existing = JSON.parse(readFileSync(path, "utf8")) as StoredConfig;
+	} catch {
+		// Nothing to preserve.
+	}
+
+	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+
+	const temporary = `${path}.tmp`;
+
+	writeFileSync(temporary, `${JSON.stringify({ ...existing, token }, null, "\t")}\n`, {
+		mode: 0o600,
+	});
+	// Set explicitly as well as passed to writeFileSync: the mode argument is only applied when the file
+	// is created, so a leftover temporary file from an interrupted write would keep whatever mode it had.
+	chmodSync(temporary, 0o600);
+	renameSync(temporary, path);
+
+	return path;
+}
+
+/**
+ * Removes the stored token, leaving the rest of the file alone.
+ *
+ * Does not touch {@link TOKEN_VARIABLE}: a token in the environment belongs to whatever set it, and a
+ * command that could not remove it must not report that it did — which is why `logout` says which source
+ * is still in force rather than claiming to have signed anybody out.
+ *
+ * @param path Where the config lives, injectable for tests.
+ * @returns True when a token was removed, false when there was none to remove.
+ */
+export function clearToken(path: string = configPath()): boolean {
+	let existing: StoredConfig;
+	try {
+		existing = JSON.parse(readFileSync(path, "utf8")) as StoredConfig;
+	} catch {
+		return false;
+	}
+
+	if (existing.token === undefined) return false;
+
+	const { token: _removed, ...rest } = existing;
+	const temporary = `${path}.tmp`;
+
+	writeFileSync(temporary, `${JSON.stringify(rest, null, "\t")}\n`, { mode: 0o600 });
+	chmodSync(temporary, 0o600);
+	renameSync(temporary, path);
+
+	return true;
+}
+
+/**
  * What to tell somebody whose server has no token.
  *
  * Written once and returned by every command and every tool, so the instructions cannot drift between
@@ -95,7 +207,10 @@ export function missingCredentialsMessage(): string {
 	return [
 		"No Drop2Run access token.",
 		"",
-		"Create one at https://dropto.run/account/tokens, then either:",
+		"Run `drop2run login` to sign in through a browser, which stores one for you.",
+		"",
+		"For CI, or where no browser can be opened, create a token at",
+		"https://dropto.run/account/tokens and either:",
 		`  - set ${TOKEN_VARIABLE} in the environment, or`,
 		`  - put it in ${configPath()} as {"token": "d2r_..."}`,
 		"",

@@ -17,10 +17,14 @@
 export { createSite, listSites, type SiteSummary } from "./api.js";
 export {
 	type Credentials,
+	clearToken,
 	configPath,
 	DEFAULT_API_BASE_URL,
+	dashboardUrlFor,
 	loadCredentials,
 	missingCredentialsMessage,
+	resolveApiBaseUrl,
+	saveToken,
 	TOKEN_VARIABLE,
 } from "./config.js";
 export {

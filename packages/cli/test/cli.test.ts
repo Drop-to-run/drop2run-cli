@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { run } from "../src/cli.js";
 
@@ -35,11 +37,37 @@ describe("--help", () => {
 		expect(result.code).toBe(0);
 	});
 
-	it("says how to get a token, since there is no login yet", async () => {
+	it("lists login, and still says how to get a token without a browser", async () => {
 		const result = await run(["--help"]);
 
+		// Both, not either: `login` covers a developer's own machine, and the hand-made token is the only
+		// route in CI or a remote shell. Help that named only the first would leave the second undiscovered.
+		expect(result.text).toContain("drop2run login");
 		expect(result.text).toContain("account/tokens");
 		expect(result.text).toContain("DROP2RUN_TOKEN");
+	});
+});
+
+describe("logout", () => {
+	it("says the environment variable is still in force, rather than claiming a clean sign-out", async () => {
+		// HOME is redirected first and restored afterwards, because `logout` writes: run against the real
+		// home directory this test would delete the developer's own token. `os.homedir()` reads HOME on
+		// this platform, which is what makes the redirection enough.
+		const home = process.env.HOME;
+		process.env.HOME = mkdtempSync(join(tmpdir(), "drop2run-cli-"));
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+
+		try {
+			const result = await run(["logout"]);
+
+			// The file is what `logout` can remove; the variable outranks it. Reporting success while every
+			// later command keeps using the same account is the one answer this must never give.
+			expect(result.text).toContain("DROP2RUN_TOKEN");
+			expect(result.code).toBe(0);
+		} finally {
+			if (home === undefined) delete process.env.HOME;
+			else process.env.HOME = home;
+		}
 	});
 });
 

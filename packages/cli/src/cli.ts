@@ -1,4 +1,12 @@
-import { type CommandResult, deployCommand, list, where, whoami } from "./commands.js";
+import {
+	type CommandResult,
+	deployCommand,
+	list,
+	login,
+	logout,
+	where,
+	whoami,
+} from "./commands.js";
 
 /**
  * Parses the command line and runs the matching command.
@@ -7,14 +15,16 @@ import { type CommandResult, deployCommand, list, where, whoami } from "./comman
  * parser is the function below. A library would be a dependency in a package people install globally and
  * hand a credential to, which is the last place to add code nobody in this repository reads.
  *
- * `login` is deliberately absent: it needs endpoints the API does not have yet, and a `login` that
- * printed "not implemented" would be worse than no `login` at all — the help text names how to get a
- * token instead.
+ * `login` covers the loopback flow only. There is no `--device` yet, so an environment where no browser
+ * can reach this machine's loopback — a remote container, a plain SSH session — still needs a token
+ * created by hand, and the help text says so rather than offering a flag that does nothing.
  */
 
 /** What the CLI prints when asked, and when it does not understand. */
 const HELP = `drop2run — publish a static site from the command line
 
+  drop2run login                               Sign in through a browser and store a token
+  drop2run logout                              Remove the stored token
   drop2run deploy [dir] [--site <subdomain>]   Publish a folder (default: .)
   drop2run ls                                  List your sites
   drop2run whoami                              Check the token and whose it is
@@ -25,8 +35,9 @@ Flags
   --json      Print machine-readable output instead of text
   --site X    Publish over an existing site rather than creating one
 
-Signing in
-  There is no \`drop2run login\` yet. Create a token at
+Signing in without a browser
+  \`login\` opens a browser and listens on 127.0.0.1, so it needs both on this
+  machine. For CI, or a remote shell, create a token at
   https://dropto.run/account/tokens and either set DROP2RUN_TOKEN in your
   environment or put it in ~/.config/drop2run/config.json as {"token": "d2r_..."}.
 `;
@@ -78,7 +89,7 @@ export async function run(argv: readonly string[]): Promise<CommandResult> {
 	if (command === undefined) return { text: HELP, json: { help: HELP }, code: 1 };
 
 	const site = flagValue(argv, "--site");
-	const result = await dispatch(command, rest, site);
+	const result = await dispatch(command, rest, site, json);
 
 	return json ? { ...result, text: JSON.stringify(result.json, null, 2) } : result;
 }
@@ -89,14 +100,23 @@ export async function run(argv: readonly string[]): Promise<CommandResult> {
  * @param command First positional argument.
  * @param rest Remaining positional arguments.
  * @param site Value of `--site`, if given.
+ * @param json Whether `--json` was asked for, which decides whether progress may be printed. Only
+ * `login` needs it: it is the one command that says something while it waits, and prose interleaved with
+ * a JSON document is not JSON.
  * @returns The command's result.
  */
 async function dispatch(
 	command: string,
 	rest: readonly string[],
 	site: string | undefined,
+	json: boolean,
 ): Promise<CommandResult> {
 	switch (command) {
+		case "login":
+			// Progress goes to stderr, so a shell reading stdout gets only the result even without --json.
+			return await login(json ? () => {} : (line) => console.error(line));
+		case "logout":
+			return logout();
 		case "deploy":
 			return await deployCommand(rest[0] ?? ".", site);
 		case "ls":

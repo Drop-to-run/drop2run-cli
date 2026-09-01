@@ -1,13 +1,26 @@
 import { resolve } from "node:path";
 import {
 	type Credentials,
+	clearToken,
 	configPath,
+	dashboardUrlFor,
 	listSites,
 	loadCredentials,
 	missingCredentialsMessage,
 	publishDirectory,
+	resolveApiBaseUrl,
+	saveToken,
 	TOKEN_VARIABLE,
 } from "@drop2run/node";
+import {
+	clientName,
+	consentUrl,
+	exchange,
+	listen,
+	newAttempt,
+	openBrowser,
+	waitForCallback,
+} from "./login.js";
 
 /**
  * What each subcommand does, separated from how it was typed.
@@ -47,6 +60,96 @@ function credentialsOr(): { credentials: Credentials } | { result: CommandResult
 	if (credentials === null) return { result: failure(missingCredentialsMessage()) };
 
 	return { credentials };
+}
+
+/**
+ * Signs in through a browser and stores the token that comes back.
+ *
+ * <b>The order of operations is the security of the whole flow.</b> The listener is opened before the
+ * browser, so the port in the consent URL is one this process already holds; the verifier never leaves
+ * this function; and the token is written only after the exchange has succeeded, so a failed sign-in
+ * cannot leave a half-written credential behind a working one.
+ *
+ * <b>Prints the URL rather than relying on the browser opening.</b> A container, an SSH session and a
+ * machine with no desktop all reach this, and in every one of them the flow still completes if the person
+ * opens the URL themselves. Under `--json` the URL is in the result instead, because a wrapper reading
+ * JSON cannot use a line of prose telling somebody to click something.
+ *
+ * @param print Writes progress for a person, injectable so a test does not print and so `--json` can
+ * suppress it.
+ * @returns The result. The token is never in it, in either form.
+ */
+export async function login(print: (line: string) => void = console.error): Promise<CommandResult> {
+	const apiBaseUrl = resolveApiBaseUrl();
+	const attempt = newAttempt();
+	const name = clientName();
+
+	let listener: Awaited<ReturnType<typeof listen>>;
+	try {
+		listener = await listen(attempt.state);
+	} catch (error) {
+		return failure(
+			`Could not open a local port to receive the sign-in: ${
+				error instanceof Error ? error.message : String(error)
+			}`,
+		);
+	}
+
+	try {
+		const url = consentUrl(dashboardUrlFor(apiBaseUrl), attempt, listener.port, name);
+
+		print(`Opening ${url}`);
+		if (!openBrowser(url)) print("Could not open a browser. Open the URL above yourself.");
+		print(`Waiting for authorization of "${name}"…`);
+
+		const { code } = await waitForCallback(listener.received);
+		const issued = await exchange(apiBaseUrl, code, attempt.verifier);
+		const path = saveToken(issued.token);
+
+		return {
+			text: `Signed in${issued.email === null ? "" : ` as ${issued.email}`}.\nToken "${issued.name}" saved to ${path}`,
+			json: { email: issued.email, name: issued.name, configPath: path, apiBaseUrl },
+			code: 0,
+		};
+	} catch (error) {
+		return failure(error instanceof Error ? error.message : String(error));
+	} finally {
+		// Always, on every path: a listener left open holds a port and keeps the process alive, which turns
+		// a failed sign-in into a command that never returns.
+		listener.close();
+	}
+}
+
+/**
+ * Removes the stored token.
+ *
+ * <b>Says what is still in force rather than claiming success.</b> A token in the environment outranks the
+ * file, so a `logout` that printed "signed out" while `DROP2RUN_TOKEN` was set would be lying about the
+ * one thing somebody ran it to be sure of.
+ *
+ * @returns The result.
+ */
+export function logout(): CommandResult {
+	const removed = clearToken();
+	const fromEnvironment = process.env[TOKEN_VARIABLE]?.trim();
+
+	const lines = [
+		removed
+			? `Removed the token stored in ${configPath()}.`
+			: "There was no stored token to remove.",
+	];
+
+	if (fromEnvironment) {
+		lines.push(
+			`${TOKEN_VARIABLE} is still set in this environment, so commands will keep using it. Unset it to sign out fully.`,
+		);
+	}
+
+	return {
+		text: lines.join("\n"),
+		json: { removed, environmentTokenStillSet: Boolean(fromEnvironment) },
+		code: 0,
+	};
 }
 
 /**
