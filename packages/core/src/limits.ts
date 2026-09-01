@@ -71,8 +71,13 @@ export function isDocumentPath(path: string): boolean {
 export function formatBytes(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+	if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
-	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	// The scale stopped at MB, which was right while the only thing measured here was one deploy. It is
+	// also used for an account's total storage, and that is where it broke down: 1.8 GB in use read as
+	// "1843.2 MB", and a Pro account near its ceiling as "51200.0 MB" — a figure nobody converts in
+	// their head, next to a limit already written as "50 GB".
+	return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 /**
