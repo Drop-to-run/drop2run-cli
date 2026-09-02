@@ -2,6 +2,7 @@
 	"name": "@drop2run/node",
 	"version": "0.0.0",
 	"private": true,
+	"license": "MIT",
 	"type": "module",
 	"description": "Config, credentials and a filesystem source: the parts that need a machine.",
 	"exports": {

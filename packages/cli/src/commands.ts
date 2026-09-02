@@ -19,6 +19,8 @@ import {
 	listen,
 	newAttempt,
 	openBrowser,
+	pollDevice,
+	startDevice,
 	waitForCallback,
 } from "./login.js";
 
@@ -119,6 +121,80 @@ export async function login(print: (line: string) => void = console.error): Prom
 		listener.close();
 	}
 }
+
+/**
+ * Signs in without a browser on this machine, by having somebody approve a code elsewhere.
+ *
+ * <b>What this covers that `login` cannot.</b> The loopback flow ends in a redirect to 127.0.0.1, which
+ * requires the browser and this process to be on the same machine. Over SSH, in a dev container or under
+ * WSL they are not — so the only channel left is a person carrying eight characters to another screen.
+ *
+ * <b>The long code never leaves this process and the short one collects nothing.</b> Somebody reading the
+ * short code over a shoulder learns which sign-in is waiting, not how to take its token.
+ *
+ * <b>Waiting is the whole command.</b> It polls at the interval the server hands out, obeys `slow_down`
+ * when told, and stops on the deadline rather than running forever — a CI job that hangs here is worse than
+ * one that fails.
+ *
+ * @param print Writes progress for a person, injectable so a test does not print and `--json` can suppress it.
+ * @param sleep Waits between polls, injectable so a test does not spend a minute proving the loop works.
+ * @returns The result. The token is never in it, in either form.
+ */
+export async function loginWithDevice(
+	print: (line: string) => void = console.error,
+	sleep: (ms: number) => Promise<void> = (ms) => new Promise((done) => setTimeout(done, ms)),
+): Promise<CommandResult> {
+	const apiBaseUrl = resolveApiBaseUrl();
+	const name = clientName();
+
+	let request: Awaited<ReturnType<typeof startDevice>>;
+	try {
+		request = await startDevice(apiBaseUrl, name);
+	} catch (error) {
+		return failure(error instanceof Error ? error.message : String(error));
+	}
+
+	print(`Open ${request.verificationUri} and enter this code:`);
+	print("");
+	print(`    ${request.userCode}`);
+	print("");
+	print(`Or open the link with the code already in it: ${request.verificationUriComplete}`);
+	print(`Waiting for approval of "${name}"…`);
+
+	// From the server's own answer rather than a constant here, so the pace is the server's to change.
+	let waitMs = Math.max(1, request.intervalSeconds) * 1000;
+	const deadline = Date.now() + DEVICE_TIMEOUT_MS;
+
+	while (Date.now() < deadline) {
+		await sleep(waitMs);
+
+		const poll = await pollDevice(apiBaseUrl, request.deviceCode);
+
+		if (poll.state === "granted") {
+			const path = saveToken(poll.token.token);
+
+			return {
+				text: `Signed in${poll.token.email === null ? "" : ` as ${poll.token.email}`}.\nToken "${poll.token.name}" saved to ${path}`,
+				json: { email: poll.token.email, name: poll.token.name, configPath: path, apiBaseUrl },
+				code: 0,
+			};
+		}
+
+		if (poll.state === "dead") return failure(poll.message);
+
+		// Backing off on being told to, rather than only on the next attempt: a client that acknowledged
+		// `slow_down` and then polled at the same rate would be told again forever.
+		if (poll.state === "slow_down") waitMs = Math.min(waitMs * 2, MAX_POLL_MS);
+	}
+
+	return failure("Timed out waiting for approval. Nothing has been changed.");
+}
+
+/** How long a device sign-in waits before giving up, matching the fifteen minutes the codes last. */
+const DEVICE_TIMEOUT_MS = 15 * 60 * 1000;
+
+/** Longest gap between polls, so backing off repeatedly cannot stretch into never asking again. */
+const MAX_POLL_MS = 30 * 1000;
 
 /**
  * Removes the stored token.

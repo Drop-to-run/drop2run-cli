@@ -2,6 +2,7 @@
 	"name": "@drop2run/mcp",
 	"version": "0.0.0",
 	"private": true,
+	"license": "MIT",
 	"type": "module",
 	"description": "MCP server that publishes a folder or a page to Drop2Run from inside a chat.",
 	"bin": {

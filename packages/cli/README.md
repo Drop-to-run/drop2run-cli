@@ -3,7 +3,7 @@
 Publish a static site to [Drop2Run](https://dropto.run) from the command line.
 
 ```
-drop2run login                               Sign in through a browser and store a token
+drop2run login [--device]                    Sign in and store a token
 drop2run logout                              Remove the stored token
 drop2run deploy [dir] [--site <subdomain>]   Publish a folder (default: .)
 drop2run ls                                  List your sites
@@ -18,20 +18,27 @@ drop2run where                               Show which token source is in use
 `drop2run login` opens a browser, waits on `127.0.0.1`, and stores the token it is handed in
 `~/.config/drop2run/config.json` with mode `0600`.
 
-Three things about it are worth knowing, because they decide when it will not work:
+Two things about it are worth knowing, because they decide when it works:
 
 - **It needs a browser and loopback on the same machine.** The token is delivered by a redirect to a
   temporary server this process opens on `127.0.0.1`, which is what keeps it out of clipboards and
-  scrollback. A remote shell whose browser is on another machine cannot complete that redirect.
+  scrollback. A remote shell whose browser is on another machine cannot complete that redirect — use
+  `--device` there.
 - **It uses PKCE, so there is no client secret.** A verifier is generated per sign-in and never leaves the
   process; only its SHA-256 travels through the browser. A code intercepted anywhere along the way cannot
   be exchanged without the verifier.
-- **There is no `--device` yet.** The device-code flow from §4 of `docs/briefs/DEVTOOLS-BRIEF.md` is the
-  next slice, and it is the one that covers SSH, dev containers and WSL. The flag is deliberately absent
-  rather than present and failing.
 
-For CI, or where `login` cannot work, create a token at <https://dropto.run/account/tokens> and either set
-it in the environment:
+### `--device`, for a machine with no browser
+
+`drop2run login --device` prints a short code and waits. Enter it at <https://dropto.run/device> from any
+machine you are signed in on — a phone will do — and the terminal picks up its token.
+
+The short code is not the credential: it names the pending request, and approving it releases a long code
+that never left the waiting process. Somebody reading it over your shoulder learns which sign-in is
+waiting, not how to collect its token. It lasts fifteen minutes and works once.
+
+For CI, neither flow applies — nothing there can open a browser or approve anything. Create a token at
+<https://dropto.run/account/tokens> and either set it in the environment:
 
 ```
 DROP2RUN_TOKEN=d2r_...

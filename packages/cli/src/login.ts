@@ -279,6 +279,114 @@ export function consentUrl(
 	return url.toString();
 }
 
+/** What opening a device sign-in returns. */
+export interface DeviceRequest {
+	/** The long code this process keeps; it is what collects the token. */
+	readonly deviceCode: string;
+	/** The short code a person carries to another machine. */
+	readonly userCode: string;
+	/** The page to open, with the code already in it. */
+	readonly verificationUriComplete: string;
+	/** The page to open when the code has to be typed by hand. */
+	readonly verificationUri: string;
+	/** How long to wait between polls, in seconds. */
+	readonly intervalSeconds: number;
+}
+
+/**
+ * Opens a device sign-in.
+ *
+ * @param apiBaseUrl Base URL of the API.
+ * @param clientName What this machine calls itself.
+ * @returns The two codes and where to send somebody.
+ * @throws Error carrying the API's own `detail` where it sent one.
+ */
+export async function startDevice(apiBaseUrl: string, clientName: string): Promise<DeviceRequest> {
+	const response = await fetch(`${apiBaseUrl}/auth/cli/device`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ clientName }),
+	});
+
+	if (!response.ok) throw new Error(await problemDetail(response));
+
+	return (await response.json()) as DeviceRequest;
+}
+
+/** What one poll of a device sign-in produced. */
+export type DevicePoll =
+	| { readonly state: "pending" }
+	| { readonly state: "slow_down" }
+	| { readonly state: "granted"; readonly token: ExchangedToken }
+	| { readonly state: "dead"; readonly message: string };
+
+/**
+ * Asks once whether a device sign-in has been approved.
+ *
+ * <b>Three outcomes, not two, and the caller must act differently on each.</b> Pending and `slow_down` both
+ * mean keep waiting — the second more slowly — while anything else is over. A client that treated a refusal
+ * as pending would poll a dead request until it expired, leaving somebody watching a terminal that never
+ * finishes after they pressed Refuse.
+ *
+ * Network failures are reported as pending rather than as death: a laptop that lost its wifi for a moment
+ * has not had its sign-in refused, and giving up on the first dropped packet is the wrong reading of a flow
+ * that is expected to last minutes.
+ *
+ * @param apiBaseUrl Base URL of the API.
+ * @param deviceCode The long code.
+ * @returns What this poll established.
+ */
+export async function pollDevice(apiBaseUrl: string, deviceCode: string): Promise<DevicePoll> {
+	let response: Response;
+
+	try {
+		response = await fetch(`${apiBaseUrl}/auth/cli/device/token`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ deviceCode }),
+		});
+	} catch {
+		return { state: "pending" };
+	}
+
+	if (response.ok) {
+		const body = (await response.json()) as {
+			token: string;
+			name: string;
+			email: string | null;
+		};
+
+		return { state: "granted", token: { token: body.token, name: body.name, email: body.email } };
+	}
+
+	const problem = (await response.json().catch(() => null)) as {
+		type?: string;
+		detail?: string;
+	} | null;
+
+	// Branching on the stable code rather than on the message, which is the contract these codes exist for
+	// — see `Errors.AuthorizationPending`. A client matching on wording breaks the moment it is rephrased.
+	if (problem?.type === "authorization_pending") return { state: "pending" };
+	if (problem?.type === "slow_down") return { state: "slow_down" };
+
+	return {
+		state: "dead",
+		message: problem?.detail ?? `The API answered ${response.status}.`,
+	};
+}
+
+/**
+ * Reads the API's own wording out of a failed response.
+ *
+ * @param response The failed response.
+ * @returns The `detail` the API sent, or a sentence naming the status.
+ */
+async function problemDetail(response: Response): Promise<string> {
+	const problem = (await response.json().catch(() => null)) as { detail?: string } | null;
+
+	return problem?.detail ?? `The API answered ${response.status}.`;
+}
+
 /** What the exchange endpoint answers with. */
 export interface ExchangedToken {
 	/** The plaintext token. */
@@ -309,11 +417,7 @@ export async function exchange(
 		body: JSON.stringify({ code, verifier }),
 	});
 
-	if (!response.ok) {
-		const problem = (await response.json().catch(() => null)) as { detail?: string } | null;
-
-		throw new Error(problem?.detail ?? `The API answered ${response.status}.`);
-	}
+	if (!response.ok) throw new Error(await problemDetail(response));
 
 	const body = (await response.json()) as { token: string; name: string; email: string | null };
 

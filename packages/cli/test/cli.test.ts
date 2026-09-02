@@ -37,12 +37,13 @@ describe("--help", () => {
 		expect(result.code).toBe(0);
 	});
 
-	it("lists login, and still says how to get a token without a browser", async () => {
+	it("lists all three ways to sign in, since each covers a case the others cannot", async () => {
 		const result = await run(["--help"]);
 
-		// Both, not either: `login` covers a developer's own machine, and the hand-made token is the only
-		// route in CI or a remote shell. Help that named only the first would leave the second undiscovered.
+		// Three, not one: loopback for a developer's own machine, `--device` for a remote shell, and a
+		// hand-made token for CI. Help that named only the first would leave somebody over SSH stuck.
 		expect(result.text).toContain("drop2run login");
+		expect(result.text).toContain("--device");
 		expect(result.text).toContain("account/tokens");
 		expect(result.text).toContain("DROP2RUN_TOKEN");
 	});

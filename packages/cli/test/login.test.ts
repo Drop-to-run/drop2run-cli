@@ -6,6 +6,8 @@ import {
 	exchange,
 	listen,
 	newAttempt,
+	pollDevice,
+	startDevice,
 	waitForCallback,
 } from "../src/login.js";
 
@@ -218,5 +220,126 @@ describe("exchange", () => {
 		);
 
 		await expect(exchange("https://dropto.run/api", "d2c_code", "v")).rejects.toThrow(/502/);
+	});
+});
+
+/**
+ * Builds a problem response the way the API does.
+ *
+ * @param type Stable error code.
+ * @param detail Wording for whoever asked.
+ * @returns A 400 carrying both.
+ */
+function problem(type: string, detail = "…"): Response {
+	return new Response(JSON.stringify({ type, detail }), {
+		status: 400,
+		headers: { "Content-Type": "application/problem+json" },
+	});
+}
+
+describe("pollDevice", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("reads pending and slow_down as two different instructions", async () => {
+		// The distinction the codes exist for: both mean keep waiting, and only one means slow down. A
+		// client that could not tell them apart would have no way to learn it is the problem.
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => problem("authorization_pending")),
+		);
+		expect((await pollDevice("https://dropto.run/api", "d2d_x")).state).toBe("pending");
+
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => problem("slow_down")),
+		);
+		expect((await pollDevice("https://dropto.run/api", "d2d_x")).state).toBe("slow_down");
+	});
+
+	it("treats a refusal as over rather than as pending", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => problem("invalid_grant", "Whoever was asked declined it.")),
+		);
+
+		const poll = await pollDevice("https://dropto.run/api", "d2d_x");
+
+		// If this read as pending, pressing Refuse would leave the far-away terminal polling a dead
+		// request until it expired — the failure hardest to explain to whoever pressed it.
+		expect(poll.state).toBe("dead");
+		expect(poll.state === "dead" && poll.message).toMatch(/declined/);
+	});
+
+	it("returns the token once it is granted", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				Response.json({ token: "d2r_new", name: "ssh-box", email: "who@example.test" }),
+			),
+		);
+
+		expect(await pollDevice("https://dropto.run/api", "d2d_x")).toEqual({
+			state: "granted",
+			token: { token: "d2r_new", name: "ssh-box", email: "who@example.test" },
+		});
+	});
+
+	it("treats a dropped connection as pending, not as a refusal", async () => {
+		// A laptop that lost its wifi for a moment has not had its sign-in refused, and a flow expected to
+		// last minutes must not give up on one failed request.
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				throw new TypeError("fetch failed");
+			}),
+		);
+
+		expect((await pollDevice("https://dropto.run/api", "d2d_x")).state).toBe("pending");
+	});
+
+	it("branches on the code rather than on the wording", async () => {
+		// The same situation described differently: a client matching on prose would break the next time
+		// somebody rephrased a message.
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => problem("authorization_pending", "Nobody has got round to it.")),
+		);
+
+		expect((await pollDevice("https://dropto.run/api", "d2d_x")).state).toBe("pending");
+	});
+});
+
+describe("startDevice", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("sends the client name and returns both codes", async () => {
+		const seen: { url: string; body: Record<string, unknown> } = { url: "", body: {} };
+
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL, init?: RequestInit) => {
+				seen.url = String(input);
+				seen.body = JSON.parse(String(init?.body));
+
+				return Response.json({
+					deviceCode: "d2d_long",
+					userCode: "H7KD-9MXQ",
+					verificationUri: "https://dropto.run/device",
+					verificationUriComplete: "https://dropto.run/device?code=H7KD-9MXQ",
+					intervalSeconds: 5,
+				});
+			}),
+		);
+
+		const request = await startDevice("https://dropto.run/api", "ssh-box");
+
+		expect(seen.url).toBe("https://dropto.run/api/auth/cli/device");
+		expect(seen.body).toEqual({ clientName: "ssh-box" });
+		expect(request.deviceCode).toBe("d2d_long");
+		expect(request.userCode).toBe("H7KD-9MXQ");
 	});
 });

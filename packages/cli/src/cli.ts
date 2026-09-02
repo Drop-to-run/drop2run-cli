@@ -3,6 +3,7 @@ import {
 	deployCommand,
 	list,
 	login,
+	loginWithDevice,
 	logout,
 	where,
 	whoami,
@@ -15,15 +16,16 @@ import {
  * parser is the function below. A library would be a dependency in a package people install globally and
  * hand a credential to, which is the last place to add code nobody in this repository reads.
  *
- * `login` covers the loopback flow only. There is no `--device` yet, so an environment where no browser
- * can reach this machine's loopback — a remote container, a plain SSH session — still needs a token
- * created by hand, and the help text says so rather than offering a flag that does nothing.
+ * `login` has two flows and `--device` picks between them. They are not variations of one thing: the
+ * default opens a browser and a local port, and `--device` opens neither and waits for somebody to approve
+ * a code on another machine. Which one is right is decided by where the browser is, so it is a flag rather
+ * than something the command could work out.
  */
 
 /** What the CLI prints when asked, and when it does not understand. */
 const HELP = `drop2run — publish a static site from the command line
 
-  drop2run login                               Sign in through a browser and store a token
+  drop2run login [--device]                    Sign in and store a token
   drop2run logout                              Remove the stored token
   drop2run deploy [dir] [--site <subdomain>]   Publish a folder (default: .)
   drop2run ls                                  List your sites
@@ -34,10 +36,14 @@ const HELP = `drop2run — publish a static site from the command line
 Flags
   --json      Print machine-readable output instead of text
   --site X    Publish over an existing site rather than creating one
+  --device    Sign in by approving a code on another machine
 
-Signing in without a browser
+Signing in
   \`login\` opens a browser and listens on 127.0.0.1, so it needs both on this
-  machine. For CI, or a remote shell, create a token at
+  machine. Over SSH, in a container or under WSL, use \`login --device\`: it
+  prints a short code to enter at https://dropto.run/device from anywhere.
+
+  For CI, neither flow applies — create a token at
   https://dropto.run/account/tokens and either set DROP2RUN_TOKEN in your
   environment or put it in ~/.config/drop2run/config.json as {"token": "d2r_..."}.
 `;
@@ -89,7 +95,7 @@ export async function run(argv: readonly string[]): Promise<CommandResult> {
 	if (command === undefined) return { text: HELP, json: { help: HELP }, code: 1 };
 
 	const site = flagValue(argv, "--site");
-	const result = await dispatch(command, rest, site, json);
+	const result = await dispatch(command, rest, site, json, argv.includes("--device"));
 
 	return json ? { ...result, text: JSON.stringify(result.json, null, 2) } : result;
 }
@@ -110,11 +116,18 @@ async function dispatch(
 	rest: readonly string[],
 	site: string | undefined,
 	json: boolean,
+	device: boolean,
 ): Promise<CommandResult> {
 	switch (command) {
-		case "login":
+		case "login": {
 			// Progress goes to stderr, so a shell reading stdout gets only the result even without --json.
-			return await login(json ? () => {} : (line) => console.error(line));
+			const print = json ? () => {} : (line: string) => console.error(line);
+
+			// `--device` is read here rather than inside the command, because the two are different flows
+			// rather than one flow with a flag: one opens a browser and a local port, the other opens
+			// neither and waits on somebody else's machine.
+			return device ? await loginWithDevice(print) : await login(print);
+		}
 		case "logout":
 			return logout();
 		case "deploy":

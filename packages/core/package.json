@@ -2,6 +2,7 @@
 	"name": "@drop2run/core",
 	"version": "0.0.0",
 	"private": true,
+	"license": "MIT",
 	"type": "module",
 	"description": "The deploy engine: manifest, hashing, upload and go-live, with no browser in it.",
 	"exports": {
