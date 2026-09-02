@@ -96,13 +96,26 @@ listing instead would read as having worked.
 
 ## Releasing
 
-`0.0.0` is on npm, published to hold the bare name `drop2run` (brief §9.1). It is not a release: the
-version says so, and what was on the registry at that point had no `login` at all.
+`0.0.0` was published to hold the bare name `drop2run` (brief §9.1) and is not a release: what was on the
+registry at that point had no `login` at all. `0.1.0` is the first version anybody should install.
 
-`login` closes the reason there was nothing worth releasing. What still stands between here and a real
-version is the release mechanics rather than the code — `npm pack --dry-run` on every publish, changesets
-across `core` → `node` → `cli`, provenance, and a licence field on `core`, `node` and `mcp`, none of which
-declare one. Brief §9.3 has the list and why each item is on it.
+```bash
+cd packages/cli && npm publish
+```
+
+`prepublishOnly` builds and runs the tests first, and that is load-bearing rather than tidy: `files` is
+`["bin", "dist"]`, `dist` is gitignored, and `bin/drop2run.mjs` imports `../dist/index.js`. A publish from
+a checkout that had not been built would ship a package that throws on its first line — at a version
+number that can never be reused, because npm burns one even after `unpublish`.
+
+**No `--provenance`, and not by oversight.** It needs a public repository, and this is a private monorepo;
+the flag fails locally with `Automatic provenance generation not supported for provider: null` and would
+fail in Actions too. Provenance arrives with the `drop2run-cli` split in brief §9.2 — which has its own
+precondition, a `gitleaks` sweep of the whole history rather than of HEAD.
+
+Two release chores still outstanding, neither blocking: changesets across `core` → `node` → `cli`, whose
+versions have to move in that order, and the fact that this package is the only one of the four with a
+licence field.
 
 The bundle itself works. `@drop2run/core` and `@drop2run/node` are resolved by build aliases rather than
 installed, and `vite build` folds both into `dist/index.js`, so the tarball has no import pointing at
