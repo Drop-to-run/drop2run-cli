@@ -2,6 +2,15 @@
 
 Publish a static site to [Drop2Run](https://dropto.run) from the command line.
 
+```bash
+npm i -g drop2run
+drop2run login
+drop2run deploy dist
+```
+
+Node 20 or newer. That is the whole of it: `login` opens a browser and stores a token, `deploy` prints the
+URL. Full documentation at [dropto.run/docs/cli](https://dropto.run/docs/cli).
+
 ```
 drop2run login [--device]                    Sign in and store a token
 drop2run logout                              Remove the stored token
@@ -94,6 +103,11 @@ credential, and which of them has not used it since it was made. It prints prefi
 `token revoke` is refused with a message rather than treated as `list` — somebody will type it, and
 listing instead would read as having worked.
 
+---
+
+Everything below is for whoever maintains this package. It is here rather than in the monorepo's docs
+because it is about this directory — but it is on the npm page too, so it says who it is for.
+
 ## Releasing
 
 **`0.1.0` is on npm, published 02/09/2026** — the first version worth installing. `0.0.0` is also there
@@ -131,7 +145,7 @@ The bundle itself works. `@drop2run/core` and `@drop2run/node` are resolved by b
 installed, and `vite build` folds both into `dist/index.js`, so the tarball has no import pointing at
 something npm cannot fetch.
 
-## Running it from a checkout
+## Running it from the monorepo
 
 ```bash
 cd packages/cli && npm run build
