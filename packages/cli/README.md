@@ -110,18 +110,18 @@ because it is about this directory — but it is on the npm page too, so it says
 
 ## Releasing
 
-**`0.1.0` is on npm, published 02/09/2026** — the first version worth installing. `0.0.0` is also there
-and is not a release: it held the bare name `drop2run` (brief §9.1) and predates `login` entirely.
+The current version is whatever `package.json` says; the first release with `login` in it was `0.1.0`,
+published 02/09/2026. `0.0.0` is also on the registry and is not a release — it held the bare name
+`drop2run` (brief §9.1) and predates `login` entirely, so nothing should ever be pinned to it.
 
-Verified from outside rather than from the publish output, because the failure mode worth ruling out is a
-tarball with no `dist`:
+Check a publish from outside rather than from its own output, because the failure worth ruling out is a
+tarball with no `dist` — which the publish log looks perfectly happy about:
 
 ```
-$ npx drop2run@0.1.0 --version
-0.1.0
+$ npx drop2run@<version> --version
 ```
 
-The next one is the same command:
+Publishing is one command:
 
 ```bash
 cd packages/cli && npm publish

@@ -1,6 +1,6 @@
 {
 	"name": "drop2run",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Publish a static site to Drop2Run from the command line.",
 	"license": "MIT",
 	"type": "module",
