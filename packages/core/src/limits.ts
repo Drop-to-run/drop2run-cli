@@ -18,8 +18,11 @@ import { ClientErrorCode, DeployError, type ManifestFile } from "./types.js";
  * mapping step — a mapping step is where a wrong-field bug would hide.
  */
 export interface PlanLimits {
-	/** Maximum total size of the deploy, in bytes, measured after extraction. */
-	readonly maxSiteBytes: number;
+	/**
+	 * Maximum total size of the deploy, in bytes, measured after extraction — or null when the tier
+	 * bounds what the account holds in total rather than what one publish may be.
+	 */
+	readonly maxSiteBytes: number | null;
 	/** Maximum size of one file, in bytes. */
 	readonly maxFileBytes: number;
 	/** Maximum number of files. */
@@ -136,8 +139,11 @@ export function checkLimits(
 		);
 	}
 
+	// Null is not "no check" by accident: a tier with no per-publish ceiling is bounded by what the
+	// account already holds, and the browser has no way to know that figure. The server does, and it is
+	// where the refusal has to come from anyway — so this check steps aside rather than guessing.
 	const total = totalBytes(files);
-	if (total > limits.maxSiteBytes) {
+	if (limits.maxSiteBytes !== null && total > limits.maxSiteBytes) {
 		throw new DeployError(
 			ClientErrorCode.TooLarge,
 			`That drop is ${formatBytes(total)}, and this plan allows ${formatBytes(limits.maxSiteBytes)}.`,
