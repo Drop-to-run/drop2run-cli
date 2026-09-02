@@ -14,8 +14,24 @@
 /** File names dropped wherever they appear. */
 const IGNORED_EXACT = new Set([".DS_Store", "Thumbs.db", "desktop.ini", ".gitignore", ".gitkeep"]);
 
-/** Directory names whose entire subtree is skipped. */
-const IGNORED_DIRECTORIES = ["__MACOSX", ".git", "node_modules", ".svn", ".hg", ".idea", ".vscode"];
+/**
+ * Directory names whose entire subtree is skipped.
+ *
+ * `.claude` sits with `.idea` and `.vscode` rather than being a special case: all three are tool
+ * configuration that happens to live in the folder somebody publishes, and none of it belongs on a
+ * website. It was found the way the others must have been — a publish from a project folder carried
+ * `.claude/launch.json` up with the site.
+ */
+const IGNORED_DIRECTORIES = [
+	"__MACOSX",
+	".git",
+	"node_modules",
+	".svn",
+	".hg",
+	".idea",
+	".vscode",
+	".claude",
+];
 
 /**
  * Whether a collected path should be dropped before it reaches the manifest.

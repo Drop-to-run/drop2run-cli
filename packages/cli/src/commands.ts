@@ -63,6 +63,33 @@ function failure(text: string): CommandResult {
 }
 
 /**
+ * Turns whatever was thrown into something a person can act on.
+ *
+ * <b>Carries the detail as well as the message</b>, which the engine's own errors have and the first
+ * version of this threw away. `Could not upload x after 4 attempts` names the file and nothing about
+ * why — no status, no reason — so the one question it provokes is the one it cannot answer. The engine
+ * already puts the underlying failure in `DeployError.detail`; this is what gets it to a terminal.
+ *
+ * @param error Whatever was caught.
+ * @returns The failure result, with the cause appended when there is one.
+ */
+function failureFrom(error: unknown): CommandResult {
+	const message = error instanceof Error ? error.message : String(error);
+	const detail = (error as { detail?: unknown } | null)?.detail;
+	const cause = (detail as { cause?: unknown } | null | undefined)?.cause;
+
+	// Only when it says something the message does not. `String(undefined)` in an error report is worse
+	// than a shorter error report.
+	const extra = cause === undefined || cause === null ? "" : `\n${String(cause)}`;
+
+	return {
+		text: `${message}${extra}`,
+		json: { error: message, ...(detail === undefined ? {} : { detail }) },
+		code: 1,
+	};
+}
+
+/**
  * Reads credentials, or explains how to get some.
  *
  * @returns The credentials, or a result to return instead.
@@ -340,7 +367,7 @@ export async function deployCommand(
 			code: 0,
 		};
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	}
 }
 

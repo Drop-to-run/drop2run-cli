@@ -1,6 +1,9 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createServer } from "../src/server.js";
 
 /**
@@ -32,7 +35,28 @@ async function connect(): Promise<Client> {
 	return client;
 }
 
+/**
+ * HOME, redirected for every test here.
+ *
+ * <b>Isolation this file turned out not to have.</b> `loadCredentials` falls back to
+ * `~/.config/drop2run/config.json`, so "with no credentials" quietly meant "on a machine where nobody
+ * has signed in". Once somebody did, the no-credentials test read a real token and the server called
+ * production with it — the failure arrived as an answer from dropto.run rather than from a stub.
+ *
+ * A test must not be able to read a developer's credential or reach the network by accident.
+ * `os.homedir()` reads HOME on this platform, so one line covers both.
+ */
+let realHome: string | undefined;
+
+beforeEach(() => {
+	realHome = process.env.HOME;
+	process.env.HOME = mkdtempSync(join(tmpdir(), "drop2run-mcp-home-"));
+});
+
 afterEach(async () => {
+	if (realHome === undefined) delete process.env.HOME;
+	else process.env.HOME = realHome;
+
 	await Promise.all(opened.splice(0).map((client) => client.close()));
 });
 

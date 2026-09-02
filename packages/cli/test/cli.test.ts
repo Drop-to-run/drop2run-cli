@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { run } from "../src/cli.js";
 
 /**
@@ -15,7 +15,29 @@ import { run } from "../src/cli.js";
  * be used in CI, and that is the whole point of shipping one.
  */
 
+/**
+ * HOME, redirected for every test in this file.
+ *
+ * <b>Not tidiness — isolation these tests turned out not to have.</b> `loadCredentials` falls back to
+ * `~/.config/drop2run/config.json`, so "without a token" meant "without a token *and* on a machine
+ * where nobody has ever signed in". The moment somebody signed in, two tests began reading a real
+ * credential and calling production with it: the suite went red with `This access token is not valid`,
+ * which is an answer from dropto.run, not from a stub.
+ *
+ * A test must not be able to read a developer's credential, and must not be able to reach the network
+ * by accident. `os.homedir()` reads HOME on this platform, which is what makes one line enough.
+ */
+let realHome: string | undefined;
+
+beforeEach(() => {
+	realHome = process.env.HOME;
+	process.env.HOME = mkdtempSync(join(tmpdir(), "drop2run-cli-home-"));
+});
+
 afterEach(() => {
+	if (realHome === undefined) delete process.env.HOME;
+	else process.env.HOME = realHome;
+
 	vi.unstubAllGlobals();
 	delete process.env.DROP2RUN_TOKEN;
 });
@@ -164,24 +186,17 @@ describe("token", () => {
 
 describe("logout", () => {
 	it("says the environment variable is still in force, rather than claiming a clean sign-out", async () => {
-		// HOME is redirected first and restored afterwards, because `logout` writes: run against the real
-		// home directory this test would delete the developer's own token. `os.homedir()` reads HOME on
-		// this platform, which is what makes the redirection enough.
-		const home = process.env.HOME;
-		process.env.HOME = mkdtempSync(join(tmpdir(), "drop2run-cli-"));
+		// Safe to let this write, because HOME is a fresh temporary directory for every test in this file
+		// — see the note above `beforeEach`. Against a real home directory this test would delete the
+		// developer's own token.
 		process.env.DROP2RUN_TOKEN = "d2r_test";
 
-		try {
-			const result = await run(["logout"]);
+		const result = await run(["logout"]);
 
-			// The file is what `logout` can remove; the variable outranks it. Reporting success while every
-			// later command keeps using the same account is the one answer this must never give.
-			expect(result.text).toContain("DROP2RUN_TOKEN");
-			expect(result.code).toBe(0);
-		} finally {
-			if (home === undefined) delete process.env.HOME;
-			else process.env.HOME = home;
-		}
+		// The file is what `logout` can remove; the variable outranks it. Reporting success while every
+		// later command keeps using the same account is the one answer this must never give.
+		expect(result.text).toContain("DROP2RUN_TOKEN");
+		expect(result.code).toBe(0);
 	});
 });
 

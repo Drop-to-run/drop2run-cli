@@ -77,6 +77,7 @@ export async function publish(
 	let url = target.url;
 	let unchanged = false;
 	let failure: string | null = null;
+	let failureDetail: unknown;
 
 	// The engine reports through a listener rather than returning, because a browser draws a progress
 	// bar from it. Here there is nothing to draw on until the tool returns, so the events are collapsed
@@ -88,7 +89,14 @@ export async function publish(
 			url = event.url || target.url;
 		}
 		if (event.type === "done") url = event.url;
-		if (event.type === "error") failure = event.message;
+		if (event.type === "error") {
+			failure = event.message;
+			// Kept alongside the message, because the message alone is unactionable for the failure that
+			// happens most: "could not upload x after 4 attempts" names the file and not the status, and
+			// the status is the whole of what somebody needs. The engine puts it here; this is what stops
+			// it being dropped on the way to a terminal.
+			failureDetail = event.detail;
+		}
 	};
 
 	await deploy(source, target.siteId, record, undefined, {
@@ -96,8 +104,15 @@ export async function publish(
 		token: credentials.token,
 	}).catch((error: unknown) => {
 		// The engine both reports and throws. Preferring the reported message keeps the wording the same
-		// as a browser would show for the same failure.
-		throw new Error(failure ?? (error instanceof Error ? error.message : String(error)));
+		// as a browser would show for the same failure, and the detail rides along so a terminal can say
+		// why rather than only what.
+		const thrown = new Error(
+			failure ?? (error instanceof Error ? error.message : String(error)),
+		) as Error & { detail?: unknown };
+
+		thrown.detail = failureDetail ?? (error as { detail?: unknown } | null)?.detail;
+
+		throw thrown;
 	});
 
 	return { url, siteId: target.siteId, subdomain: target.subdomain, files, unchanged };

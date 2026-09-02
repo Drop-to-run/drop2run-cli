@@ -76,10 +76,11 @@ export interface ApiOptions {
 	 * Personal access token, for a caller with no browser session.
 	 *
 	 * <b>Reaches the control plane and nothing else.</b> It is attached in {@link request} only, never by
-	 * {@link uploadAll} — those PUTs go to presigned storage URLs on another host, which need no
-	 * credential of ours and must not be handed one. The devtools brief calls this out as its second
-	 * risk: this token speaks for a whole account, so every place it is sent is a place it can leak
-	 * from.
+	 * {@link uploadAll}: an upload carries its own permit, which names one key and one length and is
+	 * worth nothing else. That was true when the PUTs went to presigned R2 URLs and it is still true now
+	 * they go to our upload Worker — what changed is that the endpoint is ours, which is a reason to be
+	 * more careful rather than less. The devtools brief calls this out as its second risk: this token
+	 * speaks for a whole account, so every place it is sent is a place it can leak from.
 	 *
 	 * A browser leaves this unset and authenticates with its cookie, which is why nothing in apps/web
 	 * passes it.
@@ -112,12 +113,45 @@ export async function prepareDeploy(
 		size: file.bytes.length,
 	}));
 
-	return request<PrepareResponse>(
+	const prepared = await request<PrepareResponse>(
 		`sites/${encodeURIComponent(siteId)}/deploys/prepare`,
 		{ files: manifest },
 		options,
 		signal,
 	);
+
+	return { ...prepared, uploadUrl: absolute(prepared.uploadUrl, options.baseUrl) };
+}
+
+/**
+ * Resolves the upload endpoint against the API's own origin when the server sent a path.
+ *
+ * <b>Why the server sends a path at all.</b> Uploads go to a Worker behind the same proxy as the API,
+ * so `/upload/v1/object` is what a page needs — same origin, no CORS, and it stays correct when the
+ * deployment moves. A browser resolves it against the document; that is why this was invisible for as
+ * long as the browser was the only client.
+ *
+ * <b>Why it broke.</b> Uploads used to go to presigned R2 URLs, which are absolute, so
+ * <c>fetch</c> in Node worked by accident. Once they moved behind the Worker, every non-browser client
+ * — the CLI and the MCP server — started failing with `Failed to parse URL from /upload/v1/object`,
+ * four attempts deep, naming a file rather than the cause.
+ *
+ * Left alone when it is already absolute, and left alone when there is no absolute base to resolve
+ * against: in a browser both the base and this are paths, and the correct behaviour there is the one
+ * that was already working.
+ *
+ * @param uploadUrl What the server sent.
+ * @param baseUrl The API base, which is absolute for every client that is not a page.
+ * @returns An absolute URL where one can be worked out, and the input otherwise.
+ */
+function absolute(uploadUrl: string, baseUrl: string | undefined): string {
+	if (/^[a-z][a-z0-9+.-]*:/i.test(uploadUrl)) return uploadUrl;
+	if (baseUrl === undefined || !/^[a-z][a-z0-9+.-]*:/i.test(baseUrl)) return uploadUrl;
+
+	// Resolved against the base's *origin*, not the base itself: the API lives under a path
+	// (`https://dropto.run/api`) while the upload endpoint is rooted at the host, so joining them
+	// would produce `/api/upload/v1/object` — a 404 that would have read as a broken Worker.
+	return new URL(uploadUrl, baseUrl).toString();
 }
 
 /**
