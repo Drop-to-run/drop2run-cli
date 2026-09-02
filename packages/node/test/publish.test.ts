@@ -63,7 +63,8 @@ function stubApi(sites: unknown[] = []): Recorded[] {
 					deployId: "01JDEPLOY000000000000001",
 					total: 1,
 					reused: 0,
-					upload: [{ path: "index.html", url: "https://storage.test/put/index.html", sha256: "x" }],
+					upload: [{ path: "index.html", token: "permit-for-index.html", sha256: "x" }],
+					uploadUrl: "https://storage.test/v1/object",
 				});
 			}
 
@@ -169,6 +170,14 @@ describe("the token", () => {
 
 		const storage = seen.filter((request) => request.url.startsWith("https://storage.test/"));
 		expect(storage.length).toBeGreaterThan(0);
-		expect(storage.every((request) => request.authorization === null)).toBe(true);
+
+		// Uploads do carry an Authorization header now — the per-object permit the control plane minted,
+		// which authorises one key and nothing else. What must never travel there is the account's own
+		// token: it publishes to every site the account owns, and the upload host has no business
+		// holding it.
+		expect(
+			storage.every((request) => request.authorization === "Bearer permit-for-index.html"),
+		).toBe(true);
+		expect(storage.every((request) => !request.authorization?.includes("d2r_secret"))).toBe(true);
 	});
 });

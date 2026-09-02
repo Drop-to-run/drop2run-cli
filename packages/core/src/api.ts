@@ -16,8 +16,16 @@ export const CLAIM_TOKEN_HEADER = "X-Claim-Token";
 export interface PrepareResponse {
 	/** ULID of the new deploy. */
 	readonly deployId: string;
-	/** One presigned target per file that must be uploaded. */
+	/** One upload permit per file that must be uploaded. */
 	readonly upload: readonly UploadTarget[];
+	/**
+	 * The one endpoint every permit is presented to.
+	 *
+	 * Sent by the server rather than known by the client, because it differs between development,
+	 * tests and production — and because a client that knew it without being told would still know it
+	 * after we moved.
+	 */
+	readonly uploadUrl: string;
 	/**
 	 * How many files the live deploy already holds byte-identical. These are absent from `upload` and
 	 * the server copies them within the bucket while completing the deploy, so the client never sends

@@ -1,10 +1,14 @@
 import { ClientErrorCode, DeployError, type ManifestFile } from "./types.js";
 
 /**
- * Uploads files straight to R2 through presigned URLs.
+ * Uploads files to the upload Worker, which streams them to R2 from the nearest edge.
  *
  * The bytes never pass through the API, which is why a large deploy costs the control plane nothing.
  * The flip side is that this code owns retry and concurrency itself.
+ *
+ * Every file goes to the same URL. What may be written is decided entirely by the signed permit in the
+ * Authorization header — key, length and digest are all inside it — so there is no address here for a
+ * client to alter and nothing for it to sign.
  */
 
 /** How many uploads run at once. */
@@ -16,17 +20,23 @@ const DEFAULT_RETRIES = 3;
 /** Backoff before each retry, in milliseconds. */
 const BACKOFF_MS = [1000, 2000, 4000];
 
-/** Where one file must be PUT, as returned by the prepare endpoint. */
+/** One file's upload permit, as returned by the prepare endpoint. */
 export interface UploadTarget {
 	/** Normalized path, matching the manifest entry. */
 	readonly path: string;
-	/** Presigned URL accepting exactly one PUT of this object. */
-	readonly url: string;
 	/**
-	 * Lowercase hex SHA-256 signed into {@link url}, echoed back by the server.
+	 * Bearer token authorising exactly this object.
 	 *
-	 * The PUT must carry it as `x-amz-checksum-sha256`, base64-encoded, or the signature does not
-	 * match and storage rejects the request. It is the same digest this client sent in the manifest.
+	 * Signed by the control plane and verified by the upload Worker, which holds per-deploy state and
+	 * refuses a second write of the same key without touching R2. That refusal is why the token
+	 * replaced a presigned URL: R2 honoured those with nobody in between, so every replay was billed.
+	 */
+	readonly token: string;
+	/**
+	 * Lowercase hex SHA-256 of this file, echoed back by the server.
+	 *
+	 * Not sent as a header — it is inside the token, and R2 verifies the body against it on write. It
+	 * is here so a client can match a target back to the bytes it hashed without a second index.
 	 */
 	readonly sha256: string;
 }
@@ -46,7 +56,8 @@ export interface UploadDeps {
 /**
  * Uploads every file, reporting progress as each one lands.
  *
- * @param targets Presigned targets from the prepare endpoint.
+ * @param targets Upload permits from the prepare endpoint.
+ * @param uploadUrl The one endpoint every permit is presented to, also from the prepare endpoint.
  * @param files The hashed manifest, used to find the bytes for each target.
  * @param onProgress Called after each successful upload with counts and cumulative bytes.
  * @param signal Cancels in-flight and queued uploads.
@@ -55,6 +66,7 @@ export interface UploadDeps {
  */
 export async function uploadAll(
 	targets: readonly UploadTarget[],
+	uploadUrl: string,
 	files: readonly ManifestFile[],
 	onProgress?: (done: number, total: number, bytes: number) => void,
 	signal?: AbortSignal,
@@ -91,7 +103,13 @@ export async function uploadAll(
 				);
 			}
 
-			await uploadOne(target, file, { doFetch, delay, retries, signal });
+			await uploadOne(target, file, {
+				doFetch,
+				delay,
+				retries,
+				signal,
+				uploadUrl,
+			});
 
 			done += 1;
 			uploadedBytes += file.bytes.length;
@@ -130,6 +148,7 @@ async function uploadOne(
 		// Explicitly `| undefined` rather than optional: exactOptionalPropertyTypes distinguishes an
 		// absent property from one set to undefined, and the caller always passes the key.
 		signal: AbortSignal | undefined;
+		uploadUrl: string;
 	},
 ): Promise<void> {
 	let lastError: unknown;
@@ -144,25 +163,29 @@ async function uploadOne(
 		}
 
 		try {
-			const response = await context.doFetch(target.url, {
+			const response = await context.doFetch(context.uploadUrl, {
 				method: "PUT",
 				body: new Blob([file.bytes.slice().buffer]),
-				// Signed into the URL, so this is not optional: storage checks the bytes against it and
-				// rejects the PUT if they disagree. `Content-Length` is signed too but cannot be set
-				// here — it is a forbidden header name, and the browser derives it from the body, which
-				// is exactly the value the server signed.
-				headers: { "x-amz-checksum-sha256": toBase64Digest(target.sha256) },
+				// The permit is the whole request. `Content-Length` is required by the Worker and cannot
+				// be set here — it is a forbidden header name — but the browser derives it from the body,
+				// which is exactly the length the token names.
+				headers: { Authorization: `Bearer ${target.token}` },
 				...(context.signal ? { signal: context.signal } : {}),
 			});
 
 			if (response.ok) return;
 
-			// A rejected signature or an expired URL will not start working, so stop early rather than
-			// spending three retries on it.
-			if (response.status === 403 || response.status === 401) {
+			// A forged or expired permit will not start working, and neither will a deploy that has
+			// already used every upload it was authorised for. Stop rather than spending three retries
+			// on an answer that cannot change.
+			if (
+				response.status === 401 ||
+				response.status === 403 ||
+				response.status === 429
+			) {
 				throw new DeployError(
 					ClientErrorCode.UploadFailed,
-					`Upload of ${target.path} was rejected by storage. The upload window may have expired — try deploying again.`,
+					`Upload of ${target.path} was refused. The upload window may have expired — try deploying again.`,
 					{ path: target.path, status: response.status },
 				);
 			}
@@ -181,25 +204,6 @@ async function uploadOne(
 		`Could not upload ${target.path} after ${context.retries + 1} attempts.`,
 		{ path: target.path, cause: String(lastError) },
 	);
-}
-
-/**
- * Re-encodes a hex SHA-256 as the base64 form the S3 checksum header carries.
- *
- * The manifest, the API and this pipeline all speak lowercase hex; only the storage wire format wants
- * base64, so the conversion stays here at the edge rather than changing what the manifest holds.
- *
- * @param sha256Hex Lowercase hex digest of 64 characters.
- * @returns The same 32 bytes, base64-encoded.
- */
-function toBase64Digest(sha256Hex: string): string {
-	const bytes = new Uint8Array(sha256Hex.length / 2);
-
-	for (let i = 0; i < bytes.length; i++) {
-		bytes[i] = Number.parseInt(sha256Hex.slice(i * 2, i * 2 + 2), 16);
-	}
-
-	return btoa(String.fromCharCode(...bytes));
 }
 
 /**

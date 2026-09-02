@@ -93,6 +93,7 @@ export async function deploy(
 		// the other 497 had been lost — so the files the server is reusing are counted as already done.
 		await uploadAll(
 			prepared.upload,
+			prepared.uploadUrl,
 			hashed,
 			(done, _total, bytes) =>
 				onProgress({
