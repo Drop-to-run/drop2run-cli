@@ -5,13 +5,37 @@ Publish a static site to [Drop2Run](https://dropto.run) from the command line.
 ```
 drop2run login [--device]                    Sign in and store a token
 drop2run logout                              Remove the stored token
-drop2run deploy [dir] [--site <subdomain>]   Publish a folder (default: .)
+drop2run init [dir] [--site <subdomain>]     Tie this folder to a site
+drop2run deploy [dir] [--site <subdomain>]   Publish a folder
 drop2run ls                                  List your sites
+drop2run open [site]                         Open a site in a browser
+drop2run rollback <deployId> [--site X]      Put an earlier version back live
+drop2run rm <site> --yes                     Delete a site and everything on it
+drop2run token list                          List your access tokens
 drop2run whoami                              Check the token and whose it is
 drop2run where                               Show which token source is in use
 ```
 
 `--json` on any command prints machine-readable output instead of text.
+
+## Which site a command acts on
+
+`--site`, then `drop2run.json`, then a new one. `init` writes that file, so this is the whole of a
+normal project:
+
+```bash
+drop2run init dist        # creates a site, writes drop2run.json
+drop2run deploy           # publishes dist to it, no arguments
+```
+
+The order is not a convenience. A `deploy` that created a site while a project file sat next to it would
+leave the real site untouched and the person looking at a URL they did not expect.
+
+`rm` is the one command that will not act on what it worked out: it prints the site it would delete and
+stops, and only runs with `--yes`. There is no undo — the files go and the subdomain is released — and a
+terminal has no confirmation dialog, so the flag is the dialog.
+
+`token create` and `token revoke` do not exist; see below.
 
 ## Signing in
 
@@ -64,6 +88,11 @@ decision rather than an omission: a token that can mint tokens is not a leaked c
 one — whoever takes it makes a second, and revoking the first changes nothing because the replacement is
 one the owner never made and will not recognise. Both endpoints require a browser session. `gh` and
 `vercel` draw the line in the same place.
+
+`token list` does exist, and answers the question a terminal can answer: which machines are holding a
+credential, and which of them has not used it since it was made. It prints prefixes, never secrets.
+`token revoke` is refused with a message rather than treated as `list` — somebody will type it, and
+listing instead would read as having worked.
 
 ## Releasing
 

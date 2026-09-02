@@ -3,14 +3,23 @@ import {
 	type Credentials,
 	clearToken,
 	configPath,
+	createSite,
 	dashboardUrlFor,
+	deleteSite,
+	findSite,
 	listSites,
+	listTokens,
 	loadCredentials,
 	missingCredentialsMessage,
+	PROJECT_FILE,
+	type Project,
+	promoteDeploy,
 	publishDirectory,
+	readProject,
 	resolveApiBaseUrl,
 	saveToken,
 	TOKEN_VARIABLE,
+	writeProject,
 } from "@drop2run/node";
 import {
 	clientName,
@@ -18,6 +27,7 @@ import {
 	exchange,
 	listen,
 	newAttempt,
+	// Shared with `open`: the same three platform launchers, and the same "failure is not fatal" rule.
 	openBrowser,
 	pollDevice,
 	startDevice,
@@ -294,16 +304,32 @@ export async function list(): Promise<CommandResult> {
 /**
  * Publishes a folder.
  *
- * @param directory Folder to publish, relative to the working directory or absolute.
- * @param site Subdomain or site id to publish over, or undefined for a new site.
+ * <b>Three sources for "which site", in one order.</b> `--site` wins because it was typed for this run;
+ * then `drop2run.json`, because somebody ran `init` in this folder and meant it; and only with neither
+ * does a new site get created. The order matters more than it looks: a publish that silently created a
+ * site when a project file existed would leave the real one untouched and the person looking at a URL
+ * they did not expect.
+ *
+ * The same order decides the folder, so `drop2run deploy` in a project with `dir: "dist"` publishes
+ * `dist` rather than the repository around it.
+ *
+ * @param directory Folder to publish, or undefined to use the project file and then the working directory.
+ * @param site Subdomain or site id to publish over, or undefined to use the project file.
  * @returns The result.
  */
-export async function deployCommand(directory: string, site?: string): Promise<CommandResult> {
+export async function deployCommand(
+	directory: string | undefined,
+	site?: string,
+): Promise<CommandResult> {
 	const found = credentialsOr();
 	if ("result" in found) return found.result;
 
+	const project = readProject();
+	const target = site ?? project?.siteId;
+	const folder = directory ?? project?.dir ?? ".";
+
 	try {
-		const result = await publishDirectory(found.credentials, resolve(directory), site);
+		const result = await publishDirectory(found.credentials, resolve(folder), target);
 		const what = result.unchanged
 			? "Already up to date — nothing needed publishing."
 			: `Published ${result.files.toLocaleString()} ${result.files === 1 ? "file" : "files"}.`;
@@ -316,6 +342,240 @@ export async function deployCommand(directory: string, site?: string): Promise<C
 	} catch (error) {
 		return failure(error instanceof Error ? error.message : String(error));
 	}
+}
+
+/**
+ * Writes `drop2run.json` so this folder has a site of its own.
+ *
+ * <b>It creates a site when none is named</b>, which is a real remote effect from a command that sounds
+ * local. That is what makes `init` worth having: the point is to end up with a file naming a site that
+ * exists, and an `init` that only wrote a placeholder would leave the first `deploy` to create one
+ * anyway — at which point the file would be wrong.
+ *
+ * <b>It refuses to overwrite.</b> A second `init` in a folder that already has one would silently
+ * repoint it, and the version in git would then disagree with the version on the machine that ran it.
+ *
+ * @param directory Folder to publish, relative to the working directory.
+ * @param site Subdomain or site id of an existing site, or undefined to create one.
+ * @returns The result.
+ */
+export async function init(directory: string, site?: string): Promise<CommandResult> {
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	if (readProject() !== null) {
+		return failure(
+			`This folder already has a ${PROJECT_FILE}. Edit it, or delete it and run \`init\` again.`,
+		);
+	}
+
+	try {
+		const target =
+			site === undefined
+				? await createSite(found.credentials)
+				: await findSite(found.credentials, site);
+
+		const project: Project = {
+			siteId: target.siteId,
+			subdomain: target.subdomain,
+			dir: directory,
+		};
+
+		const path = writeProject(project);
+
+		return {
+			text: `Wrote ${path}\n${target.url}\n\`drop2run deploy\` now publishes ${directory} to this site.`,
+			json: { ...project, url: target.url, configPath: path },
+			code: 0,
+		};
+	} catch (error) {
+		return failure(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/**
+ * Deletes a site and everything published to it.
+ *
+ * <b>Refuses without `--yes`.</b> There is no undo, no trash and no second copy: the R2 objects go and
+ * the subdomain is released. A terminal has no confirmation dialog, so the flag is the confirmation —
+ * and it has to be typed after seeing the name, which is why the refusal names the site it would have
+ * deleted.
+ *
+ * @param site Subdomain or site id, or undefined to use the project file.
+ * @param confirmed Whether `--yes` was given.
+ * @returns The result.
+ */
+export async function remove(site: string | undefined, confirmed: boolean): Promise<CommandResult> {
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	const named = site ?? readProject()?.siteId;
+
+	if (named === undefined) {
+		return failure(
+			`Name the site to delete: \`drop2run rm <subdomain>\`, or run this in a folder with a ${PROJECT_FILE}.`,
+		);
+	}
+
+	try {
+		const target = await findSite(found.credentials, named);
+
+		if (!confirmed) {
+			return failure(
+				`This would delete ${target.subdomain} and every version published to it, with no way back.\n` +
+					`Run \`drop2run rm ${target.subdomain} --yes\` if that is what you want.`,
+			);
+		}
+
+		await deleteSite(found.credentials, target.siteId);
+
+		return {
+			text: `Deleted ${target.subdomain}.`,
+			json: { siteId: target.siteId, subdomain: target.subdomain, deleted: true },
+			code: 0,
+		};
+	} catch (error) {
+		return failure(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/**
+ * Makes an earlier version live again.
+ *
+ * The command somebody runs when the thing they just published is broken, which is why it takes a deploy
+ * id and nothing else to think about. `drop2run ls` does not list versions — the site's page does, and so
+ * does the JSON from a previous `deploy`.
+ *
+ * @param deployId ULID of the deploy to make live.
+ * @param site Subdomain or site id, or undefined to use the project file.
+ * @returns The result.
+ */
+export async function rollback(
+	deployId: string | undefined,
+	site?: string,
+): Promise<CommandResult> {
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	if (deployId === undefined) {
+		return failure("Name the version to roll back to: `drop2run rollback <deployId>`.");
+	}
+
+	const named = site ?? readProject()?.siteId;
+
+	if (named === undefined) {
+		return failure(
+			`Name the site: \`drop2run rollback <deployId> --site <subdomain>\`, or run this in a folder with a ${PROJECT_FILE}.`,
+		);
+	}
+
+	try {
+		const target = await findSite(found.credentials, named);
+		const promoted = await promoteDeploy(found.credentials, target.siteId, deployId);
+
+		return {
+			text: `${target.subdomain} is back on ${promoted.deployId}.\n${promoted.url}`,
+			json: promoted,
+			code: 0,
+		};
+	} catch (error) {
+		return failure(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/**
+ * Opens a site in a browser.
+ *
+ * Prints the URL as well as opening it, because the two failure modes are different: a machine with no
+ * browser still gets something to copy, and a machine that opened the wrong profile can see what it was
+ * meant to open.
+ *
+ * @param site Subdomain or site id, or undefined to use the project file.
+ * @param launch Opens a URL, injectable so a test does not open a browser.
+ * @returns The result.
+ */
+export async function open(
+	site: string | undefined,
+	launch: (url: string) => boolean = openBrowser,
+): Promise<CommandResult> {
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	const named = site ?? readProject()?.siteId;
+
+	if (named === undefined) {
+		return failure(
+			`Name the site: \`drop2run open <subdomain>\`, or run this in a folder with a ${PROJECT_FILE}.`,
+		);
+	}
+
+	try {
+		const target = await findSite(found.credentials, named);
+		const opened = launch(target.url);
+
+		return {
+			text: opened ? target.url : `${target.url}\n(Could not open a browser — open it yourself.)`,
+			json: { url: target.url, siteId: target.siteId, subdomain: target.subdomain, opened },
+			code: 0,
+		};
+	} catch (error) {
+		return failure(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/**
+ * Lists the account's access tokens.
+ *
+ * <b>The only `token` subcommand there is</b>, and `where` says why: creating and revoking need a browser
+ * session, because a token able to mint its replacement would make revoking meaningless. What this
+ * answers is the question a terminal can answer — which machines are still holding a credential, and
+ * which of them has not used it since it was made.
+ *
+ * @returns The result.
+ */
+export async function tokens(): Promise<CommandResult> {
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	try {
+		const list = await listTokens(found.credentials);
+
+		if (list.length === 0) {
+			return { text: "No access tokens.", json: { tokens: [] }, code: 0 };
+		}
+
+		const text = list
+			.map((token) => {
+				const state =
+					token.revokedAt !== null
+						? "revoked"
+						: token.expiresAt !== null && new Date(token.expiresAt).getTime() <= Date.now()
+							? "expired"
+							: "active";
+				const used =
+					token.lastUsedAt === null ? "never used" : `last used ${day(token.lastUsedAt)}`;
+
+				return `${token.prefix}…\t${token.name}\t${state}\t${used}`;
+			})
+			.join("\n");
+
+		return { text, json: { tokens: list }, code: 0 };
+	} catch (error) {
+		return failure(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/**
+ * Formats a timestamp as a calendar date.
+ *
+ * @param iso The timestamp.
+ * @returns The date, or the input when it cannot be parsed — which is more useful here than a dash,
+ * because anything unparseable in this field is a contract problem worth seeing.
+ */
+function day(iso: string): string {
+	const parsed = new Date(iso);
+
+	return Number.isNaN(parsed.getTime()) ? iso : parsed.toISOString().slice(0, 10);
 }
 
 /**

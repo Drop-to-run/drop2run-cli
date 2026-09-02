@@ -49,6 +49,119 @@ describe("--help", () => {
 	});
 });
 
+describe("rm", () => {
+	it("refuses without --yes, and names what it would have deleted", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				Response.json({
+					sites: [
+						{
+							siteId: "01J",
+							subdomain: "calm-cedar",
+							url: "https://calm-cedar.dropto.live",
+							name: null,
+						},
+					],
+				}),
+			),
+		);
+
+		const result = await run(["rm", "calm-cedar"]);
+
+		// The refusal has to carry the name: `--yes` is the confirmation, and a confirmation typed before
+		// seeing what it confirms is not one.
+		expect(result.text).toContain("calm-cedar");
+		expect(result.text).toContain("--yes");
+		expect(result.code).toBe(1);
+	});
+
+	it("deletes when told twice", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const seen: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL, init?: RequestInit) => {
+				seen.push(`${init?.method ?? "GET"} ${String(input)}`);
+
+				return String(input).endsWith("/sites")
+					? Response.json({
+							sites: [
+								{
+									siteId: "01J",
+									subdomain: "calm-cedar",
+									url: "https://calm-cedar.dropto.live",
+									name: null,
+								},
+							],
+						})
+					: new Response(null, { status: 204 });
+			}),
+		);
+
+		const result = await run(["rm", "calm-cedar", "--yes"]);
+
+		expect(result.code).toBe(0);
+		expect(seen).toContain("DELETE https://dropto.run/api/sites/01J");
+	});
+
+	it("refuses a site that is not the caller's, rather than deleting a different one", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ sites: [] })),
+		);
+
+		const result = await run(["rm", "somebody-elses", "--yes"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("somebody-elses");
+	});
+});
+
+describe("token", () => {
+	it("lists tokens without ever printing a secret", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				Response.json({
+					tokens: [
+						{
+							id: "01J",
+							name: "laptop",
+							prefix: "d2r_ABCDEFGH",
+							createdAt: "2026-09-01T10:00:00Z",
+							lastUsedAt: null,
+							expiresAt: null,
+							revokedAt: null,
+						},
+					],
+				}),
+			),
+		);
+
+		const result = await run(["token", "list"]);
+
+		expect(result.text).toContain("laptop");
+		// "never used" is the fact the listing exists for: it is what says which token is safe to revoke.
+		expect(result.text).toContain("never used");
+		expect(result.code).toBe(0);
+	});
+
+	it("refuses `token revoke` instead of quietly listing", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+
+		const result = await run(["token", "revoke"]);
+
+		// Somebody will type this. Listing instead would read as having worked, and they would go away
+		// believing a token was revoked.
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("account/tokens");
+	});
+});
+
 describe("logout", () => {
 	it("says the environment variable is still in force, rather than claiming a clean sign-out", async () => {
 		// HOME is redirected first and restored afterwards, because `logout` writes: run against the real

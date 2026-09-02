@@ -14,7 +14,17 @@
  * deviation is the discovery that "portable" and "not a browser" are different things.
  */
 
-export { createSite, listSites, type SiteSummary } from "./api.js";
+export {
+	type AccessToken,
+	createSite,
+	deleteSite,
+	findSite,
+	listSites,
+	listTokens,
+	type PromotedDeploy,
+	promoteDeploy,
+	type SiteSummary,
+} from "./api.js";
 export {
 	type Credentials,
 	clearToken,
@@ -27,6 +37,13 @@ export {
 	saveToken,
 	TOKEN_VARIABLE,
 } from "./config.js";
+export {
+	PROJECT_FILE,
+	type Project,
+	projectPath,
+	readProject,
+	writeProject,
+} from "./project.js";
 export {
 	type PublishResult,
 	publish,

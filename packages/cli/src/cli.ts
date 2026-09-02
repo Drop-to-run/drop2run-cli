@@ -1,10 +1,15 @@
 import {
 	type CommandResult,
 	deployCommand,
+	init,
 	list,
 	login,
 	loginWithDevice,
 	logout,
+	open,
+	remove,
+	rollback,
+	tokens,
 	where,
 	whoami,
 } from "./commands.js";
@@ -27,16 +32,26 @@ const HELP = `drop2run — publish a static site from the command line
 
   drop2run login [--device]                    Sign in and store a token
   drop2run logout                              Remove the stored token
-  drop2run deploy [dir] [--site <subdomain>]   Publish a folder (default: .)
+  drop2run init [dir] [--site <subdomain>]     Tie this folder to a site (writes drop2run.json)
+  drop2run deploy [dir] [--site <subdomain>]   Publish a folder (default: . or drop2run.json)
   drop2run ls                                  List your sites
+  drop2run open [site]                         Open a site in a browser
+  drop2run rollback <deployId> [--site X]      Put an earlier version back live
+  drop2run rm <site> --yes                     Delete a site and everything on it
+  drop2run token list                          List your access tokens
   drop2run whoami                              Check the token and whose it is
   drop2run where                               Show which token source is in use
   drop2run --version                           Print the version
 
 Flags
   --json      Print machine-readable output instead of text
-  --site X    Publish over an existing site rather than creating one
+  --site X    Act on an existing site rather than the one in drop2run.json
   --device    Sign in by approving a code on another machine
+  --yes       Confirm a deletion, which cannot be undone
+
+Where a site comes from
+  --site, then drop2run.json, then a new one. \`init\` writes that file, so
+  \`deploy\` in the same folder needs no arguments at all.
 
 Signing in
   \`login\` opens a browser and listens on 127.0.0.1, so it needs both on this
@@ -95,7 +110,14 @@ export async function run(argv: readonly string[]): Promise<CommandResult> {
 	if (command === undefined) return { text: HELP, json: { help: HELP }, code: 1 };
 
 	const site = flagValue(argv, "--site");
-	const result = await dispatch(command, rest, site, json, argv.includes("--device"));
+	const result = await dispatch(
+		command,
+		rest,
+		site,
+		json,
+		argv.includes("--device"),
+		argv.includes("--yes"),
+	);
 
 	return json ? { ...result, text: JSON.stringify(result.json, null, 2) } : result;
 }
@@ -109,6 +131,8 @@ export async function run(argv: readonly string[]): Promise<CommandResult> {
  * @param json Whether `--json` was asked for, which decides whether progress may be printed. Only
  * `login` needs it: it is the one command that says something while it waits, and prose interleaved with
  * a JSON document is not JSON.
+ * @param device Whether `--device` was given, which picks between the two sign-in flows.
+ * @param confirmed Whether `--yes` was given, which is the only confirmation a deletion gets.
  * @returns The command's result.
  */
 async function dispatch(
@@ -117,6 +141,7 @@ async function dispatch(
 	site: string | undefined,
 	json: boolean,
 	device: boolean,
+	confirmed: boolean,
 ): Promise<CommandResult> {
 	switch (command) {
 		case "login": {
@@ -130,11 +155,34 @@ async function dispatch(
 		}
 		case "logout":
 			return logout();
+		case "init":
+			return await init(rest[0] ?? ".", site);
 		case "deploy":
-			return await deployCommand(rest[0] ?? ".", site);
+			// Undefined rather than "." so `deployCommand` can tell "no folder given" from "this folder",
+			// which is what lets drop2run.json supply one.
+			return await deployCommand(rest[0], site);
 		case "ls":
 		case "list":
 			return await list();
+		case "open":
+			return await open(rest[0] ?? site);
+		case "rollback":
+			return await rollback(rest[0], site);
+		case "rm":
+			return await remove(rest[0] ?? site, confirmed);
+		case "token":
+		case "tokens":
+			// One subcommand, and an unknown one is refused rather than treated as `list`: `token revoke`
+			// is a thing somebody will type, and silently listing instead would read as having worked.
+			return rest[0] === undefined || rest[0] === "list"
+				? await tokens()
+				: {
+						text:
+							`\`token ${rest[0]}\` does not exist. Only \`token list\` does: creating and revoking ` +
+							"a token need a browser session, at https://dropto.run/account/tokens.",
+						json: { error: `Unknown token subcommand "${rest[0]}".` },
+						code: 1,
+					};
 		case "whoami":
 			return await whoami();
 		case "where":
