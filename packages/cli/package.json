@@ -25,6 +25,7 @@
 		"cli"
 	],
 	"scripts": {
+		"prepublishOnly": "npm run build && npm test",
 		"build": "vite build",
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run",
