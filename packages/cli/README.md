@@ -96,8 +96,18 @@ listing instead would read as having worked.
 
 ## Releasing
 
-`0.0.0` was published to hold the bare name `drop2run` (brief §9.1) and is not a release: what was on the
-registry at that point had no `login` at all. `0.1.0` is the first version anybody should install.
+**`0.1.0` is on npm, published 02/09/2026** — the first version worth installing. `0.0.0` is also there
+and is not a release: it held the bare name `drop2run` (brief §9.1) and predates `login` entirely.
+
+Verified from outside rather than from the publish output, because the failure mode worth ruling out is a
+tarball with no `dist`:
+
+```
+$ npx drop2run@0.1.0 --version
+0.1.0
+```
+
+The next one is the same command:
 
 ```bash
 cd packages/cli && npm publish
