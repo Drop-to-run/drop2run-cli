@@ -61,14 +61,13 @@ afterEach(async () => {
 });
 
 describe("the tool surface", () => {
-	it("offers exactly the four tools the README documents", async () => {
+	it("offers exactly the three tools the README documents", async () => {
 		const { tools } = await (await connect()).listTools();
 
 		expect(tools.map((tool) => tool.name).sort()).toEqual([
 			"list_sites",
 			"publish_dir",
 			"publish_files",
-			"publish_html",
 		]);
 	});
 
@@ -79,19 +78,12 @@ describe("the tool surface", () => {
 			| { items?: { required?: string[] } }
 			| undefined;
 
+		// `site` optional is the whole of "publishing without naming a site creates a new one": a required
+		// site would force a model to pick one, and the one it would pick is somebody's existing site.
 		expect(publishFiles?.inputSchema.required).toEqual(["files"]);
 		// Both halves of a file are required. A path with no content publishes an empty file, and content
 		// with no path has nowhere to go — neither is something a model should be able to send.
 		expect(files?.items?.required?.sort()).toEqual(["content", "path"]);
-	});
-
-	it("requires the content to publish, and leaves the site optional", async () => {
-		const { tools } = await (await connect()).listTools();
-		const publishHtml = tools.find((tool) => tool.name === "publish_html");
-
-		// `site` optional is the whole of "publishing without naming a site creates a new one": a required
-		// site would force a model to pick one, and the one it would pick is somebody's existing site.
-		expect(publishHtml?.inputSchema.required).toEqual(["html"]);
 	});
 
 	it("requires a path for a folder publish", async () => {

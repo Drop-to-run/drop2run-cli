@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Credentials } from "../src/config.js";
-import { publishFiles, publishHtml } from "../src/publish.js";
+import { publishFiles } from "../src/publish.js";
 
 /**
  * Which site a publish goes to, and what the request carries.
@@ -18,6 +18,9 @@ import { publishFiles, publishHtml } from "../src/publish.js";
 
 /** Credentials pointing at a stubbed API. */
 const credentials: Credentials = { token: "d2r_secret", apiBaseUrl: "https://api.test/api" };
+
+/** A one-page publish, which is what most of these tests are about the *site* of rather than the files. */
+const page = { path: "index.html", content: "<h1>hi</h1>" };
 
 /** Manifest paths of the most recent prepare, filled in by the stub. */
 const paths: string[] = [];
@@ -112,7 +115,7 @@ describe("publishing with no site named", () => {
 			},
 		]);
 
-		const result = await publishHtml(credentials, "<h1>hi</h1>");
+		const result = await publishFiles(credentials, [page]);
 
 		expect(result.siteId).toBe("01JNEWSITE0000000000000");
 		expect(
@@ -123,7 +126,7 @@ describe("publishing with no site named", () => {
 	it("returns the published URL", async () => {
 		stubApi();
 
-		expect((await publishHtml(credentials, "<h1>hi</h1>")).url).toBe(
+		expect((await publishFiles(credentials, [page])).url).toBe(
 			"https://brave-otter-4f2a.dropto.live",
 		);
 	});
@@ -140,7 +143,7 @@ describe("publishing to a named site", () => {
 			},
 		]);
 
-		expect((await publishHtml(credentials, "<h1>hi</h1>", "old-site")).siteId).toBe(
+		expect((await publishFiles(credentials, [page], "old-site")).siteId).toBe(
 			"01JOLDSITE0000000000000",
 		);
 	});
@@ -155,7 +158,7 @@ describe("publishing to a named site", () => {
 			},
 		]);
 
-		expect((await publishHtml(credentials, "<h1>hi</h1>", "01JOLDSITE0000000000000")).siteId).toBe(
+		expect((await publishFiles(credentials, [page], "01JOLDSITE0000000000000")).siteId).toBe(
 			"01JOLDSITE0000000000000",
 		);
 	});
@@ -163,7 +166,7 @@ describe("publishing to a named site", () => {
 	it("fails rather than creating a different site when the name matches nothing", async () => {
 		const seen = stubApi([]);
 
-		await expect(publishHtml(credentials, "<h1>hi</h1>", "not-mine")).rejects.toThrow(/not-mine/);
+		await expect(publishFiles(credentials, [page], "not-mine")).rejects.toThrow(/not-mine/);
 		expect(seen.some((request) => request.method === "POST")).toBe(false);
 	});
 });
@@ -172,7 +175,7 @@ describe("the token", () => {
 	it("is sent to the control plane", async () => {
 		const seen = stubApi();
 
-		await publishHtml(credentials, "<h1>hi</h1>");
+		await publishFiles(credentials, [page]);
 
 		const api = seen.filter((request) => request.url.startsWith("https://api.test/"));
 		expect(api.length).toBeGreaterThan(0);
@@ -182,7 +185,7 @@ describe("the token", () => {
 	it("is never sent to the storage host", async () => {
 		const seen = stubApi();
 
-		await publishHtml(credentials, "<h1>hi</h1>");
+		await publishFiles(credentials, [page]);
 
 		const storage = seen.filter((request) => request.url.startsWith("https://storage.test/"));
 		expect(storage.length).toBeGreaterThan(0);

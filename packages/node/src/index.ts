@@ -50,6 +50,5 @@ export {
 	publish,
 	publishDirectory,
 	publishFiles,
-	publishHtml,
 } from "./publish.js";
 export { directorySource } from "./source.js";

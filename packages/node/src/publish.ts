@@ -134,25 +134,6 @@ export function publishDirectory(
 	return publish(credentials, directorySource(directory), site);
 }
 
-/**
- * Publishes one page of HTML as a whole site.
- *
- * The common case for a chat: a model has written a page and wants it on the air. It becomes
- * `index.html` because that is the only name the server will serve as a site's entry point.
- *
- * @param credentials Token and base URL.
- * @param html The page.
- * @param site Subdomain or site id, or undefined for a new site.
- * @returns What to tell the caller.
- */
-export function publishHtml(
-	credentials: Credentials,
-	html: string,
-	site?: string,
-): Promise<PublishResult> {
-	return publishFiles(credentials, [{ path: "index.html", content: html }], site);
-}
-
 /** One file a caller wrote, rather than one read off a disk. */
 export interface AuthoredFile {
 	/** Where it goes in the site, relative to the root. */

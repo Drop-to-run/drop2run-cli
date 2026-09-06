@@ -59,12 +59,11 @@ effect without a restart.
 
 | Tool | What it does |
 |---|---|
-| `publish_html` | Publishes one HTML document as a site. It becomes `index.html` |
-| `publish_files` | Publishes files Claude wrote — markdown, several pages, a page and its stylesheet |
+| `publish_files` | Publishes files Claude wrote — a page, a markdown note, several files together |
 | `publish_dir` | Publishes a folder, given its absolute path |
 | `list_sites` | Lists the sites on the account |
 
-Every publish tool takes an optional `site` — a subdomain or site id to publish over. Leave it out and a
+Both publish tools take an optional `site` — a subdomain or site id to publish over. Leave it out and a
 new site is created.
 
 ## Behaviour worth knowing
