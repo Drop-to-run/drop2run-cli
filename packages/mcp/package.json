@@ -1,7 +1,7 @@
 {
 	"name": "@drop2run/mcp",
 	"version": "0.1.0",
-	"description": "MCP server that publishes a folder or a page to Drop2Run from inside a chat.",
+	"description": "MCP server that publishes a folder or an HTML page to Drop2Run and returns a live URL.",
 	"license": "MIT",
 	"type": "module",
 	"bin": {

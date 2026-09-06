@@ -1,37 +1,19 @@
 # @drop2run/mcp
 
-An MCP server that publishes to [Drop2Run](https://dropto.run) from inside a chat. Three tools:
+An MCP server that lets Claude — or any MCP client — publish a static site to
+[Drop2Run](https://dropto.run). Give it a folder or an HTML document; it returns a live HTTPS URL.
 
-| Tool | What it does |
-|---|---|
-| `publish_html` | Takes one HTML document, publishes it as a whole site, returns the URL |
-| `publish_dir` | Takes an absolute folder path and publishes it |
-| `list_sites` | Lists the account's sites, so a publish can go to one of them |
+Full documentation at [dropto.run/docs/mcp](https://dropto.run/docs/mcp).
 
-## Getting a token
+## Setup
 
-The server authenticates with a personal access token — there is no browser in a chat, so there is no
-cookie to use. Create one at <https://dropto.run/account/tokens>. It is shown once and stored as a hash,
-so it cannot be recovered afterwards.
+**Claude Code** — one command:
 
-Then either put it in the environment:
-
-```
-DROP2RUN_TOKEN=d2r_...
+```bash
+claude mcp add drop2run -s user -- npx -y @drop2run/mcp
 ```
 
-or in `~/.config/drop2run/config.json`:
-
-```json
-{ "token": "d2r_..." }
-```
-
-The environment wins. That file is deliberately the same one the `drop2run` CLI reads, so
-`drop2run login` covers both — and so the two can never disagree about which account is yours.
-
-Point it at a different API with `DROP2RUN_API_URL`, or `apiBaseUrl` in the same file.
-
-## Wiring it up
+**Claude Desktop** — add this to `claude_desktop_config.json`, then restart the app:
 
 ```json
 {
@@ -44,31 +26,76 @@ Point it at a different API with `DROP2RUN_API_URL`, or `apiBaseUrl` in the same
 }
 ```
 
-That is the whole configuration — `npx` fetches the package, and there is nothing to install globally.
+That file is at `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, and
+`%APPDATA%\Claude\claude_desktop_config.json` on Windows.
 
-To run it from a checkout instead, build first, because `dist/` is not in the repository:
+Nothing is installed globally either way — `npx` fetches the package when the client starts it.
+
+## Sign in
+
+The server has no browser and no dashboard session, so it authenticates with a personal access token.
+Two ways to give it one.
+
+Through the CLI, which stores it in `~/.config/drop2run/config.json` with mode `0600`:
 
 ```bash
-cd packages/mcp && npm run build
-node bin/drop2run-mcp.mjs
+npx drop2run login
 ```
 
-## Two decisions worth knowing about
+Or create a token at <https://dropto.run/account/tokens> and set it in the environment:
 
-**Publishing without naming a site creates a new one.** The obvious alternative — reuse the most recent —
-would silently replace whatever the account last published, and a tool a model calls on somebody's
-behalf is the worst place for that default. "Put this online" is not "and overwrite my last site".
+```
+DROP2RUN_TOKEN=d2r_...
+```
 
-**A token never reaches the storage host.** The bearer credential goes to the control plane only. The
-file uploads are PUTs to presigned URLs on another host, which need nothing from us — a token attached
-there would be an account credential handed to a service that never asked. There is a test for it,
-because it is the kind of thing a later refactor tidies into a shared header helper.
+A token is shown once and stored as a hash, so it cannot be read back later — create a new one if you
+lose it. The environment takes precedence over the file, and the file is the one the `drop2run` CLI
+reads, so signing in once covers both.
 
-## What the tarball contains
+The token is read on every call rather than at startup, so one added while the client is running takes
+effect without a restart.
 
-`bin/` and `dist/` only. `dist/index.js` is a bundle: the publish engine this package shares with the
-`drop2run` CLI is folded in at build time, so nothing in the published files imports a package npm
-cannot fetch.
+## The tools
 
-The two real dependencies — the MCP SDK and zod — stay external and are installed by npm. Inlining an
-SDK would mean shipping a copy that never gets a security update.
+| Tool | What it does |
+|---|---|
+| `publish_html` | Publishes one HTML document as a site. It becomes `index.html` |
+| `publish_dir` | Publishes a folder, given its absolute path |
+| `list_sites` | Lists the sites on the account |
+
+Both publish tools take an optional `site` — a subdomain or site id to publish over. Leave it out and a
+new site is created.
+
+## Behaviour worth knowing
+
+**Publishing without a `site` creates a new one.** It never replaces your most recent site by default:
+"put this online" is not "and overwrite what I published last time".
+
+**A folder can be documents instead of a built site.** `publish_dir` wants an `index.html` at the top
+level, or at least one `.md`, `.markdown` or `.pdf` file — those are served through the reader.
+
+**The URL comes back immediately; every edge has it in about a minute.** The reply also says whether a
+new version was published, or every file already matched what the site serves.
+
+**Default subdomains are not indexed.** Anything on `*.dropto.live` is served with
+`X-Robots-Tag: noindex`. Attach a custom domain if you want the site in search results.
+
+**Your token only ever reaches the Drop2Run API.** Files are uploaded to a separate storage host that
+needs no credential from us, and none is sent there.
+
+## Environment
+
+| Variable | Effect |
+|---|---|
+| `DROP2RUN_TOKEN` | The personal access token. Takes precedence over the config file |
+| `DROP2RUN_API_URL` | Point at a different API. Defaults to `https://dropto.run/api` |
+
+## If something is wrong
+
+**"No Drop2Run access token."** — the server is running but has no token. Run `npx drop2run login`, or
+set `DROP2RUN_TOKEN`. No restart needed.
+
+**Claude Desktop cannot start it** — Desktop does not inherit your shell's `PATH`. Use the absolute path
+to `npx` (`which npx`) as `command`.
+
+Needs Node 20 or newer. MIT licensed.

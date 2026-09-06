@@ -115,3 +115,17 @@ describe("a tool called with no credentials", () => {
 		expect(JSON.stringify(result.content)).toContain("account/tokens");
 	});
 });
+
+describe("the version the server reports", () => {
+	it("is the version of the package", async () => {
+		// Two places name it: the manifest npm publishes, and the constant the SDK hands to clients. A
+		// release that bumps only the manifest would leave every client told the wrong version, and
+		// nothing else would notice.
+		const manifest = (await import("../package.json", { with: { type: "json" } })).default as {
+			version: string;
+		};
+		const client = await connect();
+
+		expect(client.getServerVersion()?.version).toBe(manifest.version);
+	});
+});

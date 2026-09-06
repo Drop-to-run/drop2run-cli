@@ -20,6 +20,16 @@ import { z } from "zod";
  * open starts working without restarting anything.
  */
 
+/**
+ * The version this server reports to a client.
+ *
+ * Written here rather than read from `package.json` because the build bundles this file for node and a
+ * runtime read would resolve against `dist/`, not the package root. A test asserts the two match, so a
+ * release that bumps only the manifest fails before it is published rather than telling every client
+ * the wrong version.
+ */
+const SERVER_VERSION = "0.1.0";
+
 /** What a tool hands back to the client. */
 type ToolResult = {
 	content: { type: "text"; text: string }[];
@@ -88,7 +98,7 @@ function describe(result: PublishResult): string {
  */
 export function createServer(): McpServer {
 	const server = new McpServer(
-		{ name: "drop2run", version: "0.0.0" },
+		{ name: "drop2run", version: SERVER_VERSION },
 		{
 			instructions: [
 				"Publishes static sites to Drop2Run.",
