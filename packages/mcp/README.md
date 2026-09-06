@@ -26,8 +26,8 @@ or in `~/.config/drop2run/config.json`:
 { "token": "d2r_..." }
 ```
 
-The environment wins. That file is deliberately the same one the CLI will use, so signing in once covers
-both — and so the two can never disagree about which account is yours.
+The environment wins. That file is deliberately the same one the `drop2run` CLI reads, so
+`drop2run login` covers both — and so the two can never disagree about which account is yours.
 
 Point it at a different API with `DROP2RUN_API_URL`, or `apiBaseUrl` in the same file.
 
@@ -44,7 +44,9 @@ Point it at a different API with `DROP2RUN_API_URL`, or `apiBaseUrl` in the same
 }
 ```
 
-⚠️ **Not published yet**, so that will not work from a registry today. It runs from a checkout:
+That is the whole configuration — `npx` fetches the package, and there is nothing to install globally.
+
+To run it from a checkout instead, build first, because `dist/` is not in the repository:
 
 ```bash
 cd packages/mcp && npm run build
@@ -62,15 +64,11 @@ file uploads are PUTs to presigned URLs on another host, which need nothing from
 there would be an account credential handed to a service that never asked. There is a test for it,
 because it is the kind of thing a later refactor tidies into a shared header helper.
 
-## Why it is not published yet
+## What the tarball contains
 
-`private: true`, and the earlier reason given here was wrong. It said the package could not be published
-because `@drop2run/core` is not installed — but `dist/index.js` is a bundle, and the build folds the
-engine in, so the tarball has no import pointing at anything npm cannot fetch. The alias is a fact about
-the build, not a promise the package fails to keep.
+`bin/` and `dist/` only. `dist/index.js` is a bundle: the publish engine this package shares with the
+`drop2run` CLI is folded in at build time, so nothing in the published files imports a package npm
+cannot fetch.
 
-What is actually missing is a decision to release. Nothing here has been used by anybody yet, and the
-first version number is spent permanently the moment it is published.
-
-The real dependencies — the MCP SDK and zod — stay external and are installed by npm. Inlining an SDK
-would mean shipping a copy that never gets a security update.
+The two real dependencies — the MCP SDK and zod — stay external and are installed by npm. Inlining an
+SDK would mean shipping a copy that never gets a security update.

@@ -1,10 +1,9 @@
 {
 	"name": "@drop2run/mcp",
-	"version": "0.0.0",
-	"private": true,
+	"version": "0.1.0",
+	"description": "MCP server that publishes a folder or a page to Drop2Run from inside a chat.",
 	"license": "MIT",
 	"type": "module",
-	"description": "MCP server that publishes a folder or a page to Drop2Run from inside a chat.",
 	"bin": {
 		"drop2run-mcp": "bin/drop2run-mcp.mjs"
 	},
@@ -15,7 +14,22 @@
 	"engines": {
 		"node": ">=20"
 	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"homepage": "https://dropto.run",
+	"keywords": [
+		"mcp",
+		"ai",
+		"claude",
+		"agent",
+		"llm",
+		"static-site",
+		"deploy",
+		"hosting"
+	],
 	"scripts": {
+		"prepublishOnly": "npm run build && npm test",
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run",
 		"lint": "biome check .",
