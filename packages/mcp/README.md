@@ -60,10 +60,11 @@ effect without a restart.
 | Tool | What it does |
 |---|---|
 | `publish_html` | Publishes one HTML document as a site. It becomes `index.html` |
+| `publish_files` | Publishes files Claude wrote — markdown, several pages, a page and its stylesheet |
 | `publish_dir` | Publishes a folder, given its absolute path |
 | `list_sites` | Lists the sites on the account |
 
-Both publish tools take an optional `site` — a subdomain or site id to publish over. Leave it out and a
+Every publish tool takes an optional `site` — a subdomain or site id to publish over. Leave it out and a
 new site is created.
 
 ## Behaviour worth knowing
@@ -71,8 +72,12 @@ new site is created.
 **Publishing without a `site` creates a new one.** It never replaces your most recent site by default:
 "put this online" is not "and overwrite what I published last time".
 
-**A folder can be documents instead of a built site.** `publish_dir` wants an `index.html` at the top
-level, or at least one `.md`, `.markdown` or `.pdf` file — those are served through the reader.
+**A site can be documents instead of a built site.** A publish needs an `index.html` at the top level,
+or at least one `.md`, `.markdown` or `.pdf` file — those are served through the reader. So a single
+note is a whole site, and Claude does not have to wrap it in HTML to publish it.
+
+**`publish_files` is text.** A PDF or an image has to come off a disk with `publish_dir`, because these
+files arrive as JSON strings.
 
 **The URL comes back immediately; every edge has it in about a minute.** The reply also says whether a
 new version was published, or every file already matched what the site serves.

@@ -5,6 +5,7 @@ import {
 	missingCredentialsMessage,
 	type PublishResult,
 	publishDirectory,
+	publishFiles,
 	publishHtml,
 } from "@drop2run/node";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -28,7 +29,7 @@ import { z } from "zod";
  * release that bumps only the manifest fails before it is published rather than telling every client
  * the wrong version.
  */
-const SERVER_VERSION = "0.1.1";
+const SERVER_VERSION = "0.2.0";
 
 /** What a tool hands back to the client. */
 type ToolResult = {
@@ -103,9 +104,15 @@ export function createServer(): McpServer {
 			instructions: [
 				"Publishes static sites to Drop2Run.",
 				"",
-				"Use publish_html for a single page you have written, and publish_dir for a folder that is",
-				"already built. Leave `site` unset to publish to a brand-new site; pass a subdomain to",
-				"publish over an existing one. list_sites shows what already exists.",
+				"Use publish_html for a single page you have written, publish_files for anything else you",
+				"wrote yourself — markdown notes, several pages, a page with its stylesheet — and",
+				"publish_dir for a folder that already exists on disk. Leave `site` unset to publish to a",
+				"brand-new site; pass a subdomain to publish over an existing one. list_sites shows what",
+				"already exists.",
+				"",
+				"A site needs an index.html at its top level, or at least one .md, .markdown or .pdf file,",
+				"which publishes as a documents site and is read through a viewer. So a single note is a",
+				"whole publish; it does not need wrapping in HTML.",
 				"",
 				"Publishing over an existing site replaces what it serves, so ask before doing that to a",
 				"site the person did not name.",
@@ -129,6 +136,40 @@ export function createServer(): McpServer {
 		},
 		({ html, site }) =>
 			withCredentials(async (credentials) => describe(await publishHtml(credentials, html, site))),
+	);
+
+	server.registerTool(
+		"publish_files",
+		{
+			title: "Publish files you wrote",
+			description:
+				"Publishes one or more files written here — markdown, HTML, CSS, JSON — as a site, and " +
+				"returns its URL. Needs an index.html at the top level, or at least one .md, .markdown or " +
+				".pdf file, which is served through the documents viewer. Text only: a PDF or an image has " +
+				"to be published from disk with publish_dir.",
+			inputSchema: {
+				files: z
+					.array(
+						z.object({
+							path: z
+								.string()
+								.min(1)
+								.describe("Path inside the site, such as index.html or docs/guide.md."),
+							content: z.string().describe("The file's contents."),
+						}),
+					)
+					.min(1)
+					.describe("The files to publish."),
+				site: z
+					.string()
+					.optional()
+					.describe("Subdomain or site id to publish over. Omit to create a new site."),
+			},
+		},
+		({ files, site }) =>
+			withCredentials(async (credentials) =>
+				describe(await publishFiles(credentials, files, site)),
+			),
 	);
 
 	server.registerTool(

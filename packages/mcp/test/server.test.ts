@@ -61,14 +61,28 @@ afterEach(async () => {
 });
 
 describe("the tool surface", () => {
-	it("offers exactly the three tools the README documents", async () => {
+	it("offers exactly the four tools the README documents", async () => {
 		const { tools } = await (await connect()).listTools();
 
 		expect(tools.map((tool) => tool.name).sort()).toEqual([
 			"list_sites",
 			"publish_dir",
+			"publish_files",
 			"publish_html",
 		]);
+	});
+
+	it("takes a list of files with a path each, and still no required site", async () => {
+		const { tools } = await (await connect()).listTools();
+		const publishFiles = tools.find((tool) => tool.name === "publish_files");
+		const files = publishFiles?.inputSchema.properties?.files as
+			| { items?: { required?: string[] } }
+			| undefined;
+
+		expect(publishFiles?.inputSchema.required).toEqual(["files"]);
+		// Both halves of a file are required. A path with no content publishes an empty file, and content
+		// with no path has nowhere to go — neither is something a model should be able to send.
+		expect(files?.items?.required?.sort()).toEqual(["content", "path"]);
 	});
 
 	it("requires the content to publish, and leaves the site optional", async () => {

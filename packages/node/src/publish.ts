@@ -150,7 +150,85 @@ export function publishHtml(
 	html: string,
 	site?: string,
 ): Promise<PublishResult> {
-	const bytes = new TextEncoder().encode(html);
+	return publishFiles(credentials, [{ path: "index.html", content: html }], site);
+}
 
-	return publish(credentials, async () => [{ path: "index.html", bytes }], site);
+/** One file a caller wrote, rather than one read off a disk. */
+export interface AuthoredFile {
+	/** Where it goes in the site, relative to the root. */
+	readonly path: string;
+	/** Its contents, as text. */
+	readonly content: string;
+}
+
+/**
+ * Cleans one caller-supplied path, or says why it cannot be used.
+ *
+ * <b>Not a security boundary.</b> The server normalizes every path it is given and derives the storage
+ * key itself, so nothing here decides where bytes land. What it decides is when somebody finds out: a
+ * model writing `/docs/api.md` or `..\\notes.md` means a file at an ordinary place, and answering that
+ * at the tool is a sentence rather than a deploy that fails halfway.
+ *
+ * @param path The path as given.
+ * @returns The cleaned path.
+ * @throws Error when it names no usable file.
+ */
+function cleanPath(path: string): string {
+	const cleaned = path
+		.trim()
+		.replaceAll("\\", "/")
+		.replace(/^\.?\//, "");
+
+	if (cleaned === "" || cleaned.endsWith("/")) {
+		throw new Error(`"${path}" does not name a file.`);
+	}
+
+	if (cleaned.split("/").includes("..") || /^[a-zA-Z]:/.test(cleaned)) {
+		throw new Error(
+			`"${path}" is not a path inside the site. Give a path relative to the site's root, such as ` +
+				"index.html or docs/guide.md.",
+		);
+	}
+
+	return cleaned;
+}
+
+/**
+ * Publishes files the caller wrote, rather than files on a disk.
+ *
+ * The case {@link publishDirectory} cannot serve: the content was written in the conversation and there
+ * is no folder to point at. A site needs an `index.html` at its top level, or at least one `.md`,
+ * `.markdown` or `.pdf` file — so a single note publishes as a documents site, read through the viewer.
+ *
+ * Text only, which is why a PDF has to come off a disk: these bytes arrive as a JSON string.
+ *
+ * @param credentials Token and base URL.
+ * @param files What to publish, each with a path relative to the site root.
+ * @param site Subdomain or site id, or undefined for a new site.
+ * @returns What to tell the caller.
+ * @throws Error when a path names nothing usable, or two files claim the same one.
+ */
+// `async` for the rejection rather than for an await: the path checks run before anything is sent, and
+// a plain function returning `Promise` would throw those synchronously — past every caller that handles
+// a failed publish by catching the promise, which is all of them.
+export async function publishFiles(
+	credentials: Credentials,
+	files: readonly AuthoredFile[],
+	site?: string,
+): Promise<PublishResult> {
+	const encoder = new TextEncoder();
+	const collected = files.map((file) => ({
+		path: cleanPath(file.path),
+		bytes: encoder.encode(file.content),
+	}));
+
+	// Two entries claiming one path would upload both and serve whichever the manifest kept last — a
+	// coin toss the caller never sees reported, and one a model writing paths can lose by a typo.
+	const seen = new Set<string>();
+	for (const file of collected) {
+		if (seen.has(file.path)) throw new Error(`Two files were given the same path: ${file.path}`);
+		seen.add(file.path);
+	}
+
+	return publish(credentials, async () => collected, site);
 }

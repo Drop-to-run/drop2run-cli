@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Credentials } from "../src/config.js";
-import { publishHtml } from "../src/publish.js";
+import { publishFiles, publishHtml } from "../src/publish.js";
 
 /**
  * Which site a publish goes to, and what the request carries.
@@ -18,6 +18,9 @@ import { publishHtml } from "../src/publish.js";
 
 /** Credentials pointing at a stubbed API. */
 const credentials: Credentials = { token: "d2r_secret", apiBaseUrl: "https://api.test/api" };
+
+/** Manifest paths of the most recent prepare, filled in by the stub. */
+const paths: string[] = [];
 
 /** One request the code under test made. */
 interface Recorded {
@@ -59,11 +62,24 @@ function stubApi(sites: unknown[] = []): Recorded[] {
 			}
 
 			if (url.includes("/deploys/prepare")) {
+				// Echoes the manifest rather than answering with a fixed file. The server issues one permit
+				// per path it was sent, and a stub that always said `index.html` could only ever exercise a
+				// one-file publish — which is every publish this file made until `publishFiles` existed.
+				const manifest = JSON.parse(String(init?.body ?? "{}")) as {
+					files?: { path: string; sha256: string }[];
+				};
+				const files = manifest.files ?? [];
+				paths.splice(0, paths.length, ...files.map((file) => file.path));
+
 				return Response.json({
 					deployId: "01JDEPLOY000000000000001",
-					total: 1,
+					total: files.length,
 					reused: 0,
-					upload: [{ path: "index.html", token: "permit-for-index.html", sha256: "x" }],
+					upload: files.map((file) => ({
+						path: file.path,
+						token: `permit-for-${file.path}`,
+						sha256: file.sha256,
+					})),
 					uploadUrl: "https://storage.test/v1/object",
 				});
 			}
@@ -179,5 +195,67 @@ describe("the token", () => {
 			storage.every((request) => request.authorization === "Bearer permit-for-index.html"),
 		).toBe(true);
 		expect(storage.every((request) => !request.authorization?.includes("d2r_secret"))).toBe(true);
+	});
+});
+
+describe("publishing files written here rather than read off a disk", () => {
+	it("publishes a lone markdown file, which needs no index.html", async () => {
+		// The gap this closes. A site is publishable with an index.html *or* at least one .md, .markdown
+		// or .pdf, so a note somebody asked to put online is already a whole publish — and a tool that
+		// only took HTML left a model wrapping it in a page to get through.
+		stubApi();
+
+		const result = await publishFiles(credentials, [
+			{ path: "notes.md", content: "# Notes\n\nSomething worth reading." },
+		]);
+
+		expect(paths).toEqual(["notes.md"]);
+		expect(result.url).toBe("https://brave-otter-4f2a.dropto.live");
+	});
+
+	it("carries every file, not only the first", async () => {
+		stubApi();
+
+		const result = await publishFiles(credentials, [
+			{ path: "index.html", content: "<link rel=stylesheet href=style.css>" },
+			{ path: "style.css", content: "body { color: rebeccapurple }" },
+			{ path: "docs/guide.md", content: "# Guide" },
+		]);
+
+		expect([...paths].sort()).toEqual(["docs/guide.md", "index.html", "style.css"]);
+		expect(result.files).toBe(3);
+	});
+
+	it("takes a path written the way a model writes one", async () => {
+		stubApi();
+
+		await publishFiles(credentials, [
+			{ path: "/index.html", content: "<h1>hi</h1>" },
+			{ path: "./docs\\guide.md", content: "# Guide" },
+		]);
+
+		expect([...paths].sort()).toEqual(["docs/guide.md", "index.html"]);
+	});
+
+	it("refuses a path that climbs out of the site, before sending anything", async () => {
+		const seen = stubApi();
+
+		await expect(
+			publishFiles(credentials, [{ path: "../../.ssh/id_rsa", content: "x" }]),
+		).rejects.toThrow(/inside the site/);
+
+		// Nothing left: no manifest, and no site created to hold one.
+		expect(seen).toEqual([]);
+	});
+
+	it("refuses two files claiming one path rather than serving whichever won", async () => {
+		stubApi();
+
+		await expect(
+			publishFiles(credentials, [
+				{ path: "index.html", content: "first" },
+				{ path: "./index.html", content: "second" },
+			]),
+		).rejects.toThrow(/same path/);
 	});
 });

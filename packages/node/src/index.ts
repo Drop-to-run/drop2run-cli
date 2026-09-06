@@ -45,9 +45,11 @@ export {
 	writeProject,
 } from "./project.js";
 export {
+	type AuthoredFile,
 	type PublishResult,
 	publish,
 	publishDirectory,
+	publishFiles,
 	publishHtml,
 } from "./publish.js";
 export { directorySource } from "./source.js";
