@@ -1,4 +1,4 @@
-import { isDocumentPath } from "./limits.js";
+import { canPublish, isDocumentPath, renameOfLoneHtmlPage } from "./limits.js";
 import type { DroppedFile } from "./types.js";
 
 /**
@@ -60,6 +60,15 @@ export interface FolderSummary {
 	 * anything it refuses must be something the caller can stop before an upload starts.
 	 */
 	readonly publishable: boolean;
+	/**
+	 * The file about to be renamed to `index.html`, or null when none is.
+	 *
+	 * Only ever set for a drop of one HTML page, which publishes as the site's root rather than as a
+	 * one-file documents site holding a link to itself. Reported rather than done quietly: the renamed
+	 * file is the one that answers the URL somebody is about to share, so the screen has to say so
+	 * before anything is uploaded.
+	 */
+	readonly renamedToIndex: string | null;
 	/**
 	 * Whether this looks like a project rather than a project's build output — the single most common
 	 * mistake this product has.
@@ -145,7 +154,15 @@ export function summarise(payload: readonly DroppedFile[] | File): DropSummary {
 		.map((file) => ({ kind: "file" as const, ...file }))
 		.sort((a, b) => b.bytes - a.bytes);
 
-	const publishable = hasIndexHtml || documents > 0;
+	// The same predicate `checkLimits` refuses on, rather than the two conditions this line used to
+	// carry. It had `hasIndexHtml || documents > 0`, which was the whole rule at the time and became two
+	// thirds of it — so a lone note would have been shown as unpublishable right up to the moment the
+	// service published it.
+	const paths = dropped.map((entry) => entry.path);
+	const renamedToIndex = renameOfLoneHtmlPage(paths);
+	// Asked of the paths as they will be sent, which for a lone HTML page means after the rename: the
+	// screen must not report "nothing to serve" about a drop that is about to become an index page.
+	const publishable = canPublish(renamedToIndex === null ? paths : ["index.html"]);
 
 	// Asks `hasIndexHtml`, not `publishable`, and the difference is a real case: a source tree almost
 	// always carries a README, so a project dropped whole is publishable — as a documents site of its
@@ -164,6 +181,7 @@ export function summarise(payload: readonly DroppedFile[] | File): DropSummary {
 		hasIndexHtml,
 		documents,
 		publishable,
+		renamedToIndex,
 		looksLikeProject,
 		entries: [...folderEntries, ...fileEntries],
 	};

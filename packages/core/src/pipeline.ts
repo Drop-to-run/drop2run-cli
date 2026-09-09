@@ -1,6 +1,6 @@
 import { type ApiOptions, completeDeploy, prepareDeploy } from "./api.js";
 import { hashAll } from "./hash.js";
-import { checkLimits, type PlanLimits } from "./limits.js";
+import { checkLimits, type PlanLimits, renameOfLoneHtmlPage } from "./limits.js";
 import { suggestSiteName } from "./title.js";
 import type { CollectedFile, ProgressListener } from "./types.js";
 import { asDeployError, type UploadDeps, uploadAll } from "./upload.js";
@@ -27,9 +27,7 @@ import { asDeployError, type UploadDeps, uploadAll } from "./upload.js";
  * @param signal Aborts reading.
  * @returns The files to publish, already named.
  */
-export type DeploySource = (
-	signal?: AbortSignal,
-) => Promise<readonly CollectedFile[]>;
+export type DeploySource = (signal?: AbortSignal) => Promise<readonly CollectedFile[]>;
 
 /** Everything the caller can vary, separate from the four documented arguments. */
 export interface DeployOptions extends ApiOptions {
@@ -63,8 +61,28 @@ export async function deploy(
 	options: DeployOptions = {},
 ): Promise<void> {
 	try {
-		const files = await source(signal);
-		onProgress({ type: "collecting", files: files.length });
+		const collected = await source(signal);
+		onProgress({ type: "collecting", files: collected.length });
+
+		/*
+		 * A lone HTML page becomes the site's `index.html`, so the address somebody is about to share
+		 * serves their page rather than a viewer holding a link to it.
+		 *
+		 * Here, before hashing, rather than in whatever read the files. Every source funnels through this
+		 * one line — a dropped file, a zip that happens to hold a single page, a CLI reading a path — and
+		 * doing it per-source is how those three came to disagree about zips in the first place. It is
+		 * also the last moment it is free: after `hashAll` the path is part of a manifest the server has
+		 * been asked about.
+		 *
+		 * `summarise` reports the same rename from the same predicate, so the confirmation screen can say
+		 * it is about to happen. Silently renaming the one file whose name becomes the URL would be a
+		 * surprise nobody could trace.
+		 */
+		const rename = renameOfLoneHtmlPage(collected.map((file) => file.path));
+		const files: readonly CollectedFile[] =
+			rename === null
+				? collected
+				: collected.map((file) => (file.path === rename ? { ...file, path: "index.html" } : file));
 
 		const hashed = await hashAll(
 			files,

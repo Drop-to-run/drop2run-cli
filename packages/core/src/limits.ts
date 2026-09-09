@@ -66,6 +66,124 @@ export function isDocumentPath(path: string): boolean {
 }
 
 /**
+ * Extensions the viewer can render, which make a drop of **exactly one file** publishable.
+ *
+ * ⚠️ Mirrors `_viewableExtensions` in `SiteModeDetection`, which in turn mirrors `kindOf` in
+ * `apps/viewer/src/paths.ts` minus its `binary` fallback. Three lists, one fact, and no compiler
+ * between them: widen the viewer without widening these and a file the product can display is refused
+ * before it is uploaded; widen these without the viewer and a published file is handed back as a
+ * download.
+ *
+ * Only ever asked of a single-file drop, and that bound is the point rather than an omission. Nearly
+ * every web project folder holds a `.json` or a `.css`, so counting these at any size would take a
+ * `dist/assets/` dropped instead of `dist/` and publish it as a documents site of JavaScript bundles
+ * — instead of the refusal that says which folder to drop. One file has no such ambiguity: there is
+ * nothing else it could have been part of, and the person picked that exact file.
+ *
+ * `.html` is in here as a floor. {@link renameOfLoneHtmlPage} turns a lone HTML file into the
+ * `index.html` it plainly is, so the normal path never reaches this entry; a caller that skips the
+ * rename should still get a readable one-file site rather than a rejection.
+ */
+const VIEWABLE_EXTENSIONS = [
+	// Documents — these also count at any depth, via DOCUMENT_EXTENSIONS.
+	".md",
+	".markdown",
+	".pdf",
+	// Prose the reader shows preformatted.
+	".txt",
+	".log",
+	".csv",
+	// Source the reader shows with highlighting.
+	".json",
+	".yaml",
+	".yml",
+	".toml",
+	".css",
+	".js",
+	".ts",
+	".tsx",
+	".jsx",
+	".sh",
+	".xml",
+	// Pictures the reader shows with an img element.
+	".png",
+	".jpg",
+	".jpeg",
+	".gif",
+	".webp",
+	".avif",
+	".svg",
+	".ico",
+	// See the note above: a floor for a caller that did not rename it.
+	".html",
+	".htm",
+];
+
+/**
+ * Whether a path is a file the viewer can render.
+ *
+ * Wider than {@link isDocumentPath}, and only meaningful for a drop of one file — see
+ * {@link VIEWABLE_EXTENSIONS} for why both halves of that are true.
+ *
+ * @param path A normalized manifest path.
+ * @returns True when its extension is one the viewer renders.
+ */
+export function isViewablePath(path: string): boolean {
+	const lower = path.toLowerCase();
+
+	return VIEWABLE_EXTENSIONS.some((extension) => lower.endsWith(extension));
+}
+
+/**
+ * Whether a set of paths leaves something at the root of a site, and so can be published at all.
+ *
+ * Three rules, the same three `SiteModeDetection.CanServe` applies on the server and in the same order:
+ * an `index.html` at the root, or one document at any depth, or a single file the viewer can render.
+ *
+ * Exported so the confirmation screen and {@link checkLimits} cannot answer it differently — the screen
+ * used to compute its own version and told people a folder of markdown had no index page.
+ *
+ * @param paths Normalized manifest paths.
+ * @returns True when the drop can be published.
+ */
+export function canPublish(paths: readonly string[]): boolean {
+	if (paths.some((path) => path === REQUIRED_INDEX)) return true;
+	if (paths.some(isDocumentPath)) return true;
+
+	return paths.length === 1 && paths[0] !== undefined && isViewablePath(paths[0]);
+}
+
+/**
+ * The name a lone HTML page is about to be published under, when it is not already `index.html`.
+ *
+ * <b>A single dropped `page.html` is a page, and a page wants to be the site's root.</b> Left alone it
+ * would publish as a one-file documents site whose only content is a link to itself, because the viewer
+ * deliberately does not render HTML inline — a customer's page is a page, and framing it inside the
+ * reader's chrome would put two documents on one screen. Renaming it makes the address the person
+ * actually wanted: the site's root serves their page.
+ *
+ * Reported as a rename rather than applied silently. The published URL is the thing somebody is about to
+ * share, so a step that changes which file answers it has to be visible on the confirmation screen
+ * before anything is uploaded.
+ *
+ * Only for one file. In a folder, `page.html` is a page of a site among others and renaming it would
+ * decide which page is the front door — a choice that belongs to whoever built the folder.
+ *
+ * @param paths Normalized manifest paths.
+ * @returns The path that will be renamed to `index.html`, or null when nothing will be.
+ */
+export function renameOfLoneHtmlPage(paths: readonly string[]): string | null {
+	if (paths.length !== 1) return null;
+
+	const [only] = paths;
+	if (only === undefined || only === REQUIRED_INDEX) return null;
+
+	const lower = only.toLowerCase();
+
+	return lower.endsWith(".html") || lower.endsWith(".htm") ? only : null;
+}
+
+/**
  * Formats a byte count the way a person reads it.
  *
  * @param bytes Number of bytes.
@@ -92,10 +210,7 @@ export function formatBytes(bytes: number): string {
  * failed `GET /api/plans` should cost the user a round trip, not their deploy.
  * @throws DeployError When the drop cannot be deployed as it stands.
  */
-export function checkLimits(
-	files: readonly ManifestFile[],
-	limits: PlanLimits | null,
-): void {
+export function checkLimits(files: readonly ManifestFile[], limits: PlanLimits | null): void {
 	if (files.length === 0) {
 		throw new DeployError(
 			ClientErrorCode.Empty,
@@ -103,14 +218,18 @@ export function checkLimits(
 		);
 	}
 
-	// Either an entry point or something to read. A folder of markdown or a lone PDF publishes as a
-	// documents site, so requiring an index here would refuse a drop the server accepts — and refuse it
-	// in the one place the user cannot argue with.
-	const hasIndex = files.some((file) => file.path === REQUIRED_INDEX);
-	if (!hasIndex && !files.some((file) => isDocumentPath(file.path))) {
+	// Either an entry point, something to read, or one file worth reading on its own. A folder of
+	// markdown, a lone PDF and a lone note all publish, so requiring an index here would refuse drops the
+	// server accepts — and refuse them in the one place the user cannot argue with.
+	//
+	// `canPublish` rather than the branches inlined: the server asks the same three questions through
+	// `SiteModeDetection.CanServe`, and this copy exists only to fail fast. Narrower than the server and
+	// the browser refuses what the service would have taken; wider and somebody watches an upload finish
+	// before being told no.
+	if (!canPublish(files.map((file) => file.path))) {
 		throw new DeployError(
 			ClientErrorCode.MissingIndex,
-			`A site needs an ${REQUIRED_INDEX} at its top level, or at least one .md or .pdf file to publish as a documents site. Drop the folder that contains it, not the folder above.`,
+			`A site needs an ${REQUIRED_INDEX} at its top level, or at least one .md or .pdf file to publish as a documents site — or be a single file that can be displayed on its own, such as a note, a PDF, a page or an image. Drop the folder that contains it, not the folder above.`,
 		);
 	}
 
@@ -124,9 +243,7 @@ export function checkLimits(
 		);
 	}
 
-	const oversized = files.find(
-		(file) => file.bytes.length > limits.maxFileBytes,
-	);
+	const oversized = files.find((file) => file.bytes.length > limits.maxFileBytes);
 	if (oversized) {
 		throw new DeployError(
 			ClientErrorCode.FileTooLarge,
@@ -168,8 +285,6 @@ export function totalBytes(files: readonly { bytes: Uint8Array }[]): number {
  * @param files Files to measure.
  * @returns True when a warning is warranted.
  */
-export function shouldWarnAboutSize(
-	files: readonly { bytes: Uint8Array }[],
-): boolean {
+export function shouldWarnAboutSize(files: readonly { bytes: Uint8Array }[]): boolean {
 	return totalBytes(files) > MOBILE_WARNING_BYTES;
 }

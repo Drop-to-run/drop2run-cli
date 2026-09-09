@@ -16,11 +16,14 @@ export {
 export { hashAll, sha256Hex } from "./hash.js";
 export { shouldIgnore } from "./ignore.js";
 export {
+	canPublish,
 	checkLimits,
 	formatBytes,
 	isDocumentPath,
+	isViewablePath,
 	MOBILE_WARNING_BYTES,
 	type PlanLimits,
+	renameOfLoneHtmlPage,
 	shouldWarnAboutSize,
 	totalBytes,
 } from "./limits.js";
