@@ -11,6 +11,35 @@ npm i -g drop2run          # https://www.npmjs.com/package/drop2run
 npx @drop2run/mcp          # https://www.npmjs.com/package/@drop2run/mcp
 ```
 
+## Using them
+
+The command line tool signs in through a browser and publishes a folder:
+
+```bash
+drop2run login
+drop2run deploy dist
+```
+
+`login` needs a browser on the same machine; `drop2run login --device` covers a remote shell, and CI
+uses a `DROP2RUN_TOKEN` from <https://dropto.run/account/tokens>. The other commands are `init`,
+`ls`, `open`, `rollback`, `rm`, `token list`, `whoami` and `where`, and `--json` on any of them
+prints machine-readable output.
+
+The MCP server is registered with a client rather than run by hand — one command for Claude Code:
+
+```bash
+claude mcp add drop2run -s user -- npx -y @drop2run/mcp
+```
+
+It exposes three tools — `publish_files`, `publish_dir` and `list_sites` — and reads its token from
+the same place the CLI stores one, so signing in once covers both.
+
+Each package documents itself in full, including the sign-in flows and what happens without a
+`site`: [`packages/cli/README.md`](packages/cli/README.md) and
+[`packages/mcp/README.md`](packages/mcp/README.md). The hosted documentation is at
+[dropto.run/docs/cli](https://dropto.run/docs/cli) and
+[dropto.run/docs/mcp](https://dropto.run/docs/mcp).
+
 ## What is in here
 
 | Package | Published | What it is |
