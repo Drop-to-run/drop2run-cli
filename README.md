@@ -49,8 +49,14 @@ in practice: the code that decides what happens to a file after it leaves your m
 this repository lets you audit. What it does let you audit is everything that happens to your files and
 your token *before* that point, which is the part that runs with your privileges.
 
-Issues and pull requests about the CLI or the MCP server are welcome here. Anything about the hosted
-service belongs at [dropto.run/contact](https://dropto.run/contact).
+Issues about the CLI or the MCP server are welcome here. Anything about the hosted service belongs at
+[dropto.run/contact](https://dropto.run/contact).
+
+Pull requests are welcome too, with one thing worth knowing first: this repository is generated, so a
+pull request is not merged **here**. The change is applied in the source repository and reaches this
+one in the next export, with your commit and its authorship carried along; the pull request is then
+closed with a link to the commit. Merging it here instead would put a commit in this history that no
+future export contains, and the two would diverge on the very next update.
 
 ## Licence
 
