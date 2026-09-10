@@ -13,6 +13,13 @@
 # token is read per call rather than at boot (see src/server.ts), so a client — or a directory's
 # checker — can connect and list the three tools without one. A server that exited at startup for a
 # missing token would fail this check while working perfectly for its users.
+#
+# Measured on 2026-09-10, against a filtered export rather than against the monorepo, because the
+# export is the context a directory actually gets: the image builds at 62 MB, and piping an
+# initialize / initialized / tools-list exchange into `docker run -i` with no environment at all
+# returns serverInfo `drop2run` 0.2.0 and all three tools. stderr stayed empty and stdout carried
+# nothing but the two JSON-RPC responses — the second half of working, since stdout is the transport
+# and a stray line on it corrupts the protocol rather than turning up in a log.
 
 FROM node:22-alpine AS build
 
