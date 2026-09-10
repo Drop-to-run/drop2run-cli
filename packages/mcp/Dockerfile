@@ -1,9 +1,14 @@
-# Runs the MCP server in a container, for directories that verify a server by starting it.
+# Runs the MCP server in a container.
 #
-# Glama — the listing awesome-mcp-servers requires before it accepts an entry — builds an image and
-# checks that the server starts and answers an introspection request. Nothing here is used to publish
-# the package or to run it in production: `npx -y @drop2run/mcp` is how people actually run it, and
-# this file exists so a machine can do the same thing unattended.
+# Not how anybody is meant to run it — `npx -y @drop2run/mcp` is — and not, as this comment first
+# claimed, a requirement of any directory. It was written for Glama's verification step, and then
+# Glama turned out to generate its own Dockerfile from a form: base image, build steps, CMD. The
+# equivalent there is `["npm --prefix packages/mcp ci", "npm --prefix packages/mcp run build"]` and
+# `["node", "packages/mcp/bin/drop2run-mcp.mjs"]`, run against a clone of the whole repository.
+#
+# Kept because it still answers a real question — how do you start this thing somewhere unattended,
+# with nothing installed — and because it is the one form of that answer that has been run rather
+# than described.
 #
 # The build context is the repository root, not this directory. `packages/mcp` imports `@drop2run/core`
 # and `@drop2run/node` through relative tsconfig paths, so a context of this directory alone cannot
