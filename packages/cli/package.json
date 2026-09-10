@@ -18,11 +18,22 @@
 		"access": "public"
 	},
 	"homepage": "https://dropto.run",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Drop-to-run/drop2run-cli.git"
+	},
+	"bugs": {
+		"url": "https://github.com/Drop-to-run/drop2run-cli/issues"
+	},
 	"keywords": [
 		"static-site",
 		"deploy",
 		"hosting",
-		"cli"
+		"cli",
+		"ai",
+		"claude",
+		"agent",
+		"llm"
 	],
 	"scripts": {
 		"prepublishOnly": "npm run build && npm test",
