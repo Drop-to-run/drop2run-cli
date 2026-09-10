@@ -28,7 +28,7 @@ import { z } from "zod";
  * release that bumps only the manifest fails before it is published rather than telling every client
  * the wrong version.
  */
-const SERVER_VERSION = "0.2.0";
+const SERVER_VERSION = "0.3.0";
 
 /** What a tool hands back to the client. */
 type ToolResult = {
