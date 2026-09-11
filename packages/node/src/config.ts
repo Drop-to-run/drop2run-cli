@@ -192,27 +192,62 @@ export function clearToken(path: string = configPath()): boolean {
 	return true;
 }
 
+/** Which surface is asking, since the way out of having no token is not the same for both. */
+export type CredentialSurface = "cli" | "mcp";
+
 /**
- * What to tell somebody whose server has no token.
+ * What to tell somebody who has no token.
  *
- * Written once and returned by every command and every tool, so the instructions cannot drift between
- * them — and phrased as the two steps that fix it rather than as a description of the fault.
+ * One function so the wording cannot drift between the command line and the chat, and phrased as the
+ * steps that fix it rather than as a description of the fault.
  *
- * Deliberately says nothing about being a server or a command line: both read it, and wording that
- * named one of them would be wrong half the time it is shown.
+ * <b>The surface changes what the first step is, and it has to.</b> This used to be one message for
+ * both, on the reasoning that naming a terminal or a server would be wrong half the time. What it
+ * actually named was `drop2run login` — a command that exists only on the half of the machines that
+ * installed the CLI. Somebody who added only the MCP server was told to run a command they did not
+ * have, and the route left was creating a token on the web and hand-writing this file. The shape stays
+ * shared; the sentence that says "do this now" is per surface.
  *
- * @returns The message shown in the chat.
+ * @param surface Which surface will show this.
+ * @returns The message to print or return.
  */
-export function missingCredentialsMessage(): string {
+export function missingCredentialsMessage(surface: CredentialSurface = "cli"): string {
+	const signIn =
+		surface === "mcp"
+			? [
+					"Call the `login` tool to sign in through a browser, which stores a token.",
+					"",
+					"Where no browser can be opened on this machine — a container, a remote host — call",
+					"`login_code` instead and pass on the short code it gives you.",
+				]
+			: ["Run `drop2run login` to sign in through a browser, which stores one for you."];
+
+	// Where the token lives is the same for both, so only this half is worth saying twice — and for the
+	// server one of the two options has a catch worth naming, since a shell `export` after it started is
+	// a change it cannot see.
+	const byHand =
+		surface === "mcp"
+			? [
+					"To set one without signing in here, create a token at",
+					"https://dropto.run/account/tokens and either:",
+					`  - put it in ${configPath()} as {"token": "d2r_..."}, which this`,
+					"    server reads on every call and needs no restart, or",
+					`  - set ${TOKEN_VARIABLE} in the environment and restart this server, since it reads`,
+					"    the environment it was started in.",
+				]
+			: [
+					"For CI, or where no browser can be opened, create a token at",
+					"https://dropto.run/account/tokens and either:",
+					`  - set ${TOKEN_VARIABLE} in the environment, or`,
+					`  - put it in ${configPath()} as {"token": "d2r_..."}`,
+				];
+
 	return [
 		"No Drop2Run access token.",
 		"",
-		"Run `drop2run login` to sign in through a browser, which stores one for you.",
+		...signIn,
 		"",
-		"For CI, or where no browser can be opened, create a token at",
-		"https://dropto.run/account/tokens and either:",
-		`  - set ${TOKEN_VARIABLE} in the environment, or`,
-		`  - put it in ${configPath()} as {"token": "d2r_..."}`,
+		...byHand,
 		"",
 		"The token is shown once when it is created and cannot be recovered afterwards.",
 	].join("\n");

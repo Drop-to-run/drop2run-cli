@@ -26,6 +26,7 @@ export {
 	type SiteSummary,
 } from "./api.js";
 export {
+	type CredentialSurface,
 	type Credentials,
 	clearToken,
 	configPath,
@@ -37,6 +38,23 @@ export {
 	saveToken,
 	TOKEN_VARIABLE,
 } from "./config.js";
+export {
+	type Attempt,
+	type Callback,
+	clientName,
+	consentUrl,
+	type DevicePoll,
+	type DeviceRequest,
+	type ExchangedToken,
+	exchange,
+	type Listener,
+	listen,
+	newAttempt,
+	openBrowser,
+	pollDevice,
+	startDevice,
+	waitForCallback,
+} from "./login.js";
 export {
 	PROJECT_FILE,
 	type Project,

@@ -2,37 +2,35 @@ import { resolve } from "node:path";
 import {
 	type Credentials,
 	clearToken,
+	clientName,
 	configPath,
+	consentUrl,
 	createSite,
 	dashboardUrlFor,
 	deleteSite,
+	exchange,
 	findSite,
+	listen,
 	listSites,
 	listTokens,
 	loadCredentials,
 	missingCredentialsMessage,
+	newAttempt,
+	// Shared with `open`: the same three platform launchers, and the same "failure is not fatal" rule.
+	openBrowser,
 	PROJECT_FILE,
 	type Project,
+	pollDevice,
 	promoteDeploy,
 	publishDirectory,
 	readProject,
 	resolveApiBaseUrl,
 	saveToken,
+	startDevice,
 	TOKEN_VARIABLE,
+	waitForCallback,
 	writeProject,
 } from "@drop2run/node";
-import {
-	clientName,
-	consentUrl,
-	exchange,
-	listen,
-	newAttempt,
-	// Shared with `open`: the same three platform launchers, and the same "failure is not fatal" rule.
-	openBrowser,
-	pollDevice,
-	startDevice,
-	waitForCallback,
-} from "./login.js";
 
 /**
  * What each subcommand does, separated from how it was typed.

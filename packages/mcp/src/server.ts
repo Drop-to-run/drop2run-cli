@@ -9,15 +9,17 @@ import {
 } from "@drop2run/node";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { MAX_WAIT_SECONDS, signInWithBrowser, signInWithCode } from "./auth.js";
 
 /**
- * The MCP surface: three tools, and the rule that none of them can be reached without a token.
+ * The MCP surface: three tools that need a token, and two that get one.
  *
  * <b>Every tool answers, none of them throws at startup.</b> A server with no credential is
  * unconfigured rather than broken, and the difference is what the person sees: a sentence in the chat
- * telling them where to make a token, rather than a client reporting that the server died. That is why
- * credentials are read per call instead of once at boot — it also means a token added while the chat is
- * open starts working without restarting anything.
+ * telling them how to sign in, rather than a client reporting that the server died. That is why
+ * credentials are read per call instead of once at boot — it also means a token stored while the chat
+ * is open starts working without restarting anything, which is what makes `login` a tool rather than
+ * an instruction to go and do something in a terminal.
  */
 
 /**
@@ -28,7 +30,7 @@ import { z } from "zod";
  * release that bumps only the manifest fails before it is published rather than telling every client
  * the wrong version.
  */
-const SERVER_VERSION = "0.3.0";
+const SERVER_VERSION = "0.4.0";
 
 /** What a tool hands back to the client. */
 type ToolResult = {
@@ -57,10 +59,22 @@ async function withCredentials(
 	work: (credentials: Credentials) => Promise<string>,
 ): Promise<ToolResult> {
 	const credentials = loadCredentials();
-	if (credentials === null) return say(missingCredentialsMessage(), true);
+	// "mcp" rather than the default: the message names the first step, and here that step is the `login`
+	// tool. It used to name `drop2run login`, a command nobody who installed only this server has.
+	if (credentials === null) return say(missingCredentialsMessage("mcp"), true);
 
+	return attempt(() => work(credentials));
+}
+
+/**
+ * Runs a tool, turning a thrown error into something readable rather than a protocol failure.
+ *
+ * @param work What to do.
+ * @returns The tool result.
+ */
+async function attempt(work: () => Promise<string>): Promise<ToolResult> {
 	try {
-		return say(await work(credentials));
+		return say(await work());
 	} catch (error) {
 		// The message rather than the stack: these are read in a chat, and every one of them is either the
 		// API's own `detail` or a sentence this package wrote.
@@ -112,10 +126,65 @@ export function createServer(): McpServer {
 				"which publishes as a documents site and is read through a viewer. So one page goes at",
 				"index.html, and a single note is a whole publish that needs no wrapping in HTML.",
 				"",
+				"Publishing needs an access token. If there is none, call login — it opens a browser and",
+				"stores one, and no command line or manual token is involved. Where no browser can be",
+				"opened, login_code gives a short code to approve from another machine.",
+				"",
 				"Publishing over an existing site replaces what it serves, so ask before doing that to a",
 				"site the person did not name.",
 			].join("\n"),
 		},
+	);
+
+	server.registerTool(
+		"login",
+		{
+			title: "Sign in to Drop2Run",
+			description:
+				"Signs in through a browser on this machine and stores an access token, which every other " +
+				"tool then uses. Opens the browser here and waits for the person to approve. If it answers " +
+				"that nothing has been approved yet, call it again to keep waiting — that is not a " +
+				"failure. Needs no command line and no token pasted by hand.",
+			inputSchema: {
+				waitSeconds: z
+					.number()
+					.int()
+					.min(5)
+					.max(MAX_WAIT_SECONDS)
+					.optional()
+					.describe("How long this call waits for the approval before answering. Default 120."),
+				replace: z
+					.boolean()
+					.optional()
+					.describe(
+						"Sign in even though a token is already stored. Use when switching accounts, or " +
+							"when the stored token is being refused.",
+					),
+			},
+		},
+		({ waitSeconds, replace }) => attempt(() => signInWithBrowser(waitSeconds, replace)),
+	);
+
+	server.registerTool(
+		"login_code",
+		{
+			title: "Sign in with a code",
+			description:
+				"Signs in where no browser can be opened on this machine — a container, a remote host. The " +
+				"first call returns a short code and a URL to enter it at, which the person opens " +
+				"anywhere; call it again to wait for the approval and store the token.",
+			inputSchema: {
+				waitSeconds: z
+					.number()
+					.int()
+					.min(5)
+					.max(MAX_WAIT_SECONDS)
+					.optional()
+					.describe("How long a waiting call polls before answering. Default 120."),
+				replace: z.boolean().optional().describe("Sign in even though a token is already stored."),
+			},
+		},
+		({ waitSeconds, replace }) => attempt(() => signInWithCode(waitSeconds, replace)),
 	);
 
 	server.registerTool(

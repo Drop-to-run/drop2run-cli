@@ -72,7 +72,9 @@ DROP2RUN_TOKEN=d2r_...
 ```
 
 The environment wins over `~/.config/drop2run/config.json`, and that is the same file and precedence
-`@drop2run/mcp` uses, so signing in once covers both.
+`@drop2run/mcp` uses, so signing in once covers both — in either direction. That server runs the same
+two flows from its own `login` and `login_code` tools, so a sign-in done in a chat leaves this command
+line signed in too.
 
 `drop2run where` says which source is in force without printing the token, so "why is it using the wrong
 account" is answerable in an issue report or a CI log.

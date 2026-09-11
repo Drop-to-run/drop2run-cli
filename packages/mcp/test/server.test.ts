@@ -61,14 +61,26 @@ afterEach(async () => {
 });
 
 describe("the tool surface", () => {
-	it("offers exactly the three tools the README documents", async () => {
+	it("offers exactly the five tools the README documents", async () => {
 		const { tools } = await (await connect()).listTools();
 
 		expect(tools.map((tool) => tool.name).sort()).toEqual([
 			"list_sites",
+			"login",
+			"login_code",
 			"publish_dir",
 			"publish_files",
 		]);
+	});
+
+	it("asks for nothing to sign in, either way", async () => {
+		// Both arguments are adjustments to a flow that has to work when a model calls it with no
+		// arguments at all — which is what it will do the first time a publish is refused.
+		const { tools } = await (await connect()).listTools();
+
+		for (const name of ["login", "login_code"]) {
+			expect(tools.find((tool) => tool.name === name)?.inputSchema.required ?? []).toEqual([]);
+		}
 	});
 
 	it("takes a list of files with a path each, and still no required site", async () => {
@@ -119,6 +131,35 @@ describe("a tool called with no credentials", () => {
 
 		expect(result.isError).toBe(true);
 		expect(JSON.stringify(result.content)).toContain("account/tokens");
+	});
+
+	it("names the login tool and not a command line that may not be installed", async () => {
+		// The failure this asserts against happened: the message said to run `drop2run login`, and
+		// somebody who had added only this server had no such command. What was left was creating a token
+		// on the web and hand-writing a config file — for a server that can open a browser itself.
+		const result = await (await connect()).callTool({ name: "list_sites", arguments: {} });
+		const text = JSON.stringify(result.content);
+
+		expect(text).toContain("`login` tool");
+		expect(text).not.toContain("drop2run login");
+	});
+
+	it("says which of the two ways to set a token by hand needs a restart", async () => {
+		// Both are offered, and only one of them takes effect while the chat is open. A model told they
+		// are equivalent will suggest the `export` that this already-running process cannot see.
+		const result = await (await connect()).callTool({ name: "list_sites", arguments: {} });
+		const text = JSON.stringify(result.content);
+
+		expect(text).toContain("needs no restart");
+		expect(text).toContain("restart this server");
+	});
+});
+
+describe("the instructions about signing in", () => {
+	it("tell a model to call login rather than to ask for a token", async () => {
+		const client = await connect();
+
+		expect(client.getInstructions()).toContain("call login");
 	});
 });
 

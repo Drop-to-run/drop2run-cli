@@ -33,38 +33,41 @@ Nothing is installed globally either way — `npx` fetches the package when the 
 
 ## Sign in
 
-The server has no browser and no dashboard session, so it authenticates with a personal access token.
-Two ways to give it one.
+Ask for a publish. If there is no token yet, Claude calls the `login` tool, a browser tab opens, you
+approve the sign-in, and the publish carries on. Nothing to install, nothing to paste.
 
-Through the CLI, which stores it in `~/.config/drop2run/config.json` with mode `0600`:
+The token lands in `~/.config/drop2run/config.json` with mode `0600` — the same file the `drop2run`
+CLI uses, so signing in once covers both. It is read on every call rather than at startup, so it takes
+effect without restarting the client.
 
-```bash
-npx drop2run login
-```
+**No browser on this machine?** In a container, over SSH, on a remote host, `login_code` gives a short
+code to enter at <https://dropto.run/device> from any other device.
 
-Or create a token at <https://dropto.run/account/tokens> and set it in the environment:
-
-```
-DROP2RUN_TOKEN=d2r_...
-```
+**Or set a token yourself.** Create one at <https://dropto.run/account/tokens> and either put it in
+`~/.config/drop2run/config.json` as `{"token": "d2r_..."}`, which needs no restart, or set
+`DROP2RUN_TOKEN` in the environment the client starts the server in. The environment takes precedence
+over the file — and because it is read once at startup, setting it in a shell afterwards changes
+nothing until the client restarts the server.
 
 A token is shown once and stored as a hash, so it cannot be read back later — create a new one if you
-lose it. The environment takes precedence over the file, and the file is the one the `drop2run` CLI
-reads, so signing in once covers both.
-
-The token is read on every call rather than at startup, so one added while the client is running takes
-effect without a restart.
+lose it.
 
 ## The tools
 
 | Tool | What it does |
 |---|---|
+| `login` | Signs in through a browser on this machine and stores the token |
+| `login_code` | Signs in with a short code approved elsewhere, where no browser can be opened |
 | `publish_files` | Publishes files Claude wrote — a page, a markdown note, several files together |
 | `publish_dir` | Publishes a folder, given its absolute path |
 | `list_sites` | Lists the sites on the account |
 
 Both publish tools take an optional `site` — a subdomain or site id to publish over. Leave it out and a
 new site is created.
+
+Both sign-in tools answer "not approved yet" rather than failing while they wait, and calling them
+again keeps waiting on the same sign-in. Neither replaces a token that is already stored unless asked
+to with `replace`.
 
 ## Behaviour worth knowing
 
@@ -96,8 +99,17 @@ needs no credential from us, and none is sent there.
 
 ## If something is wrong
 
-**"No Drop2Run access token."** — the server is running but has no token. Run `npx drop2run login`, or
-set `DROP2RUN_TOKEN`. No restart needed.
+**"No Drop2Run access token."** — the server is running but has no token. Ask Claude to sign in, which
+calls `login`; or run `npx drop2run login` yourself. Either writes the same file, and no restart is
+needed.
+
+**The browser never opened.** `login` says so and returns the URL instead — open it anywhere on this
+machine, then ask Claude to call `login` again. The URL stays valid. On a machine with no browser at
+all, use `login_code`.
+
+**You signed in but publishing is still refused.** Check for `DROP2RUN_TOKEN` in the environment the
+client started the server in: it outranks the file that was just written. `login` says so when it finds
+one.
 
 **Claude Desktop cannot start it** — Desktop does not inherit your shell's `PATH`. Use the absolute path
 to `npx` (`which npx`) as `command`.

@@ -81,4 +81,21 @@ describe("missingCredentialsMessage", () => {
 	it("warns that the token is shown once, since that is what makes a lost one unrecoverable", () => {
 		expect(missingCredentialsMessage()).toContain("shown once");
 	});
+
+	it("tells the command line to run the command, and the server to call the tool", () => {
+		// One message for both surfaces is what broke: it named `drop2run login`, which does not exist on
+		// a machine that installed only the MCP server. Each surface has to name a step it can take.
+		expect(missingCredentialsMessage("cli")).toContain("drop2run login");
+		expect(missingCredentialsMessage("mcp")).toContain("`login` tool");
+		expect(missingCredentialsMessage("mcp")).not.toContain("drop2run login");
+	});
+
+	it("tells the server which way of setting a token by hand needs a restart", () => {
+		// The file is read on every call and the environment is read once at startup. A message that
+		// offered them as equals would send somebody to the one that silently does nothing.
+		const message = missingCredentialsMessage("mcp");
+
+		expect(message).toContain("needs no restart");
+		expect(message).toContain("restart this server");
+	});
 });

@@ -34,8 +34,9 @@ The MCP server is registered with a client rather than run by hand — one comma
 claude mcp add drop2run -s user -- npx -y @drop2run/mcp
 ```
 
-It exposes three tools — `publish_files`, `publish_dir` and `list_sites` — and reads its token from
-the same place the CLI stores one, so signing in once covers both.
+It exposes five tools — `publish_files`, `publish_dir`, `list_sites`, and `login` / `login_code` to get
+a token without leaving the chat. The token goes to the same place the CLI stores one, so signing in
+through either covers both.
 
 Each package documents itself in full, including the sign-in flows and what happens without a
 `site`: [`packages/cli/README.md`](packages/cli/README.md) and

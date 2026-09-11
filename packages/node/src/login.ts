@@ -5,7 +5,16 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 
 /**
- * Signing in from a terminal, without anybody pasting a credential.
+ * Signing in without anybody pasting a credential.
+ *
+ * <b>Why this is in `@drop2run/node` and not in the CLI.</b> Two surfaces sign in: the command line, and
+ * the MCP server's `login` tool. It lived beside the CLI while the CLI was the only one, and the cost of
+ * that showed up the first time somebody installed only the MCP server — the one message telling them how
+ * to get a token named a command they did not have, so the only route left was creating a token on the web
+ * and hand-writing a config file. A sign-in the chat can run needs this flow reachable from there.
+ *
+ * Nothing here prints or reads a terminal. The two callers differ in exactly that, so they keep it: the
+ * CLI writes progress to stderr as it waits, and the tool returns text once.
  *
  * <b>Why a loopback server and not a pasted code.</b> The token has to end up in this process, and every
  * route that goes through a human — copy from a browser, paste into a terminal — is a route where it ends
@@ -19,14 +28,14 @@ import { hostname } from "node:os";
  *
  * <b>What this file deliberately does not do.</b> It never writes the code anywhere, never logs a URL
  * containing it, and never prints the token it receives. The one durable side effect is the config file,
- * and that is written by `@drop2run/node` where the mode is enforced.
+ * and that is written by `saveToken` in this package, where the mode is enforced.
  */
 
 /** How long to wait for the browser before giving up, in milliseconds. */
 const TIMEOUT_MS = 5 * 60 * 1000;
 
 /** Everything one sign-in attempt needs to check what comes back to it. */
-interface Attempt {
+export interface Attempt {
 	/** The secret this process keeps; only its hash goes through the browser. */
 	readonly verifier: string;
 	/** Unpadded base64url SHA-256 of the verifier, which the server records against the code. */
@@ -60,15 +69,22 @@ export function newAttempt(): Attempt {
  * still have it" — that is what somebody reads on the tokens page when deciding what to revoke. Bounded
  * and stripped of anything that would need escaping where it is rendered.
  *
+ * <b>Why the surface is appended.</b> Two things on one machine sign in now — the command line and the
+ * MCP server — and a tokens page listing the same hostname twice cannot answer "which of these is the
+ * one I want to revoke". The hostname is truncated to make room rather than the label, so the suffix is
+ * never the half that gets cut.
+ *
+ * @param surface Short label for what is signing in, such as `mcp`. Omitted for the command line, where
+ * the bare hostname is what earlier tokens already carry.
  * @returns A name at most 64 characters long, never empty.
  */
-export function clientName(): string {
-	const raw = hostname()
-		.trim()
-		.replace(/[^A-Za-z0-9._-]/g, "-")
-		.slice(0, 64);
+export function clientName(surface?: string): string {
+	const clean = (value: string): string => value.trim().replace(/[^A-Za-z0-9._-]/g, "-");
 
-	return raw === "" ? "drop2run-cli" : raw;
+	const label = surface === undefined ? "" : `-${clean(surface).slice(0, 16)}`;
+	const raw = clean(hostname()).slice(0, 64 - label.length);
+
+	return `${raw === "" ? "drop2run" : raw}${label}`;
 }
 
 /**
@@ -167,7 +183,9 @@ export function listen(state: string): Promise<Listener> {
 				return;
 			}
 
-			respond(response, 200, "Signed in", "You can close this tab and go back to the terminal.");
+			// Deliberately does not say where to go back to: a terminal for the CLI, a chat for the MCP
+			// server's `login` tool, and naming one of them is wrong half the times this page is seen.
+			respond(response, 200, "Signed in", "You can close this tab now.");
 			settle?.({ code });
 		});
 
@@ -198,7 +216,7 @@ export function listen(state: string): Promise<Listener> {
  * Writes one of the two pages the browser sees at the end of a sign-in.
  *
  * Deliberately a whole page rather than bare text: this is the last thing somebody looks at before going
- * back to the terminal, and an unstyled word in the corner of a tab reads as a crash. Self-contained, with
+ * back to whatever started the sign-in, and an unstyled word in the corner of a tab reads as a crash. Self-contained, with
  * no request to anywhere — the listener closes moments later, so anything it linked to would fail to load.
  *
  * @param response The response to write.

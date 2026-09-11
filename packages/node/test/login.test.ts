@@ -87,6 +87,23 @@ describe("clientName", () => {
 	it("contains nothing that would need escaping where it is rendered", () => {
 		expect(clientName()).toMatch(/^[A-Za-z0-9._-]+$/);
 	});
+
+	it("appends the surface, so two tokens from one machine can be told apart", () => {
+		// Both surfaces sign in now. A tokens page listing the same hostname twice cannot answer the only
+		// question somebody is there to ask, which is which of the two to revoke.
+		const withSurface = clientName("mcp");
+
+		expect(withSurface.endsWith("-mcp")).toBe(true);
+		expect(clientName().startsWith(withSurface.slice(0, -4))).toBe(true);
+	});
+
+	it("keeps the surface when the hostname is long enough to be cut", () => {
+		// The suffix is the half that identifies what is asking, so the hostname is what gives way.
+		const name = clientName("a".repeat(20));
+
+		expect(name.length).toBeLessThanOrEqual(64);
+		expect(name).toContain(`-${"a".repeat(16)}`);
+	});
 });
 
 describe("the loopback listener", () => {
