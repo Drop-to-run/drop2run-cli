@@ -1,5 +1,8 @@
 # drop2run-cli
 
+[![Drop2Run MCP server](https://glama.ai/mcp/servers/Drop-to-run/drop2run-cli/badges/score.svg)](https://glama.ai/mcp/servers/Drop-to-run/drop2run-cli)
+[![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/dropto-run-publish)
+
 Source for the two [Drop2Run](https://dropto.run) packages that run on your machine: the `drop2run`
 command line tool and the `@drop2run/mcp` server.
 
