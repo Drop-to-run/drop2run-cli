@@ -7,13 +7,18 @@ Full documentation at [dropto.run/docs/mcp](https://dropto.run/docs/mcp).
 
 ## Setup
 
+**Claude Desktop** — download [`drop2run.mcpb`](https://dropto.run/drop2run.mcpb) and open it. Claude
+shows an install dialog; that is the whole of it. No terminal, no config file to edit, and nothing to
+install first — Claude for macOS and Windows ships the node this runs on.
+
 **Claude Code** — one command:
 
 ```bash
 claude mcp add drop2run -s user -- npx -y @drop2run/mcp
 ```
 
-**Claude Desktop** — add this to `claude_desktop_config.json`, then restart the app:
+**Claude Desktop, from npm instead** — if you would rather run the published package than the bundle,
+add this to `claude_desktop_config.json` and restart the app:
 
 ```json
 {
