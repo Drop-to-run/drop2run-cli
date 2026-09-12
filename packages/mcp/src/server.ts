@@ -1,5 +1,7 @@
 import {
 	type Credentials,
+	deleteSite,
+	findSite,
 	listSites,
 	loadCredentials,
 	missingCredentialsMessage,
@@ -12,7 +14,7 @@ import { z } from "zod";
 import { MAX_WAIT_SECONDS, signInWithBrowser, signInWithCode } from "./auth.js";
 
 /**
- * The MCP surface: three tools that need a token, and two that get one.
+ * The MCP surface: four tools that need a token, and two that get one.
  *
  * <b>Every tool answers, none of them throws at startup.</b> A server with no credential is
  * unconfigured rather than broken, and the difference is what the person sees: a sentence in the chat
@@ -42,7 +44,7 @@ const SERVER_VERSION = "0.4.2";
  * `destructiveHint` is true, so a tool that omits it is read as destructive whether or not it is, and
  * `list_sites` would be confirmed like a publish.
  *
- * `openWorldHint` is true on every one of them: all five talk to dropto.run, and none of them is
+ * `openWorldHint` is true on every one of them: all six talk to dropto.run, and none of them is
  * answerable from this machine alone.
  */
 
@@ -90,9 +92,53 @@ const READS_ONLY = {
 	openWorldHint: true,
 } as const;
 
+/**
+ * What a publish answers with, beside the sentence.
+ *
+ * Shared by both publish tools because they differ in what they take, not in what they produce — and a
+ * model that has learned one shape should not have to learn the other to do the same thing with it.
+ */
+const PUBLISH_OUTPUT = {
+	url: z.string().describe("The live URL of the published site."),
+	siteId: z.string().describe("Identifier of the site, stable across publishes."),
+	subdomain: z.string().describe("The site's subdomain, which is what `site` accepts."),
+	files: z.number().int().describe("How many files the site now serves."),
+	unchanged: z
+		.boolean()
+		.describe(
+			"True when every file already matched what the site served, so no new version was published.",
+		),
+};
+
+/**
+ * Takes a site down for good.
+ *
+ * The only tool here whose effect no later call can undo. A publish over a site replaces what it
+ * serves and the site survives; this removes the site, its history and its subdomain, and the
+ * subdomain is the part that matters — it is the URL somebody else already has.
+ *
+ * `idempotentHint` is false and means it: a second call does not quietly succeed, it fails to find
+ * anything, which is the honest answer and the one that stops a retry loop from looking like progress.
+ */
+const REMOVES_A_SITE = {
+	readOnlyHint: false,
+	destructiveHint: true,
+	idempotentHint: false,
+	openWorldHint: true,
+} as const;
+
+/** One site, as `list_sites` reports it. */
+const SITE_OUTPUT = z.object({
+	siteId: z.string().describe("Identifier of the site."),
+	subdomain: z.string().describe("Its subdomain, which is what `site` accepts."),
+	url: z.string().describe("Its live URL."),
+	name: z.string().nullable().describe("What it is called, or null when it has no name."),
+});
+
 /** What a tool hands back to the client. */
 type ToolResult = {
 	content: { type: "text"; text: string }[];
+	structuredContent?: Record<string, unknown>;
 	isError?: boolean;
 };
 
@@ -108,13 +154,34 @@ function say(text: string, isError = false): ToolResult {
 }
 
 /**
+ * Wraps a result that is both read and used.
+ *
+ * <b>Why both halves.</b> The prose is what a person sees in the chat and it stays the same sentence it
+ * was. The `structuredContent` beside it is for the model: a publish whose URL is only stated in
+ * English has to be read back out of English before anything can be done with it, and "publish this,
+ * then send me the link" is the shape most of these requests take. A tool that declares an
+ * `outputSchema` and answers with a paragraph is a tool whose next step is a guess.
+ *
+ * The text is not derived from the structure, deliberately. They answer different questions — one says
+ * what happened, the other says what it happened to — and generating the sentence from the fields
+ * would make the sentence worse in exactly the way that reads as machine output.
+ *
+ * @param text What a person reads.
+ * @param structured What a model reads, matching the tool's declared `outputSchema`.
+ * @returns The result.
+ */
+function report(text: string, structured: Record<string, unknown>): ToolResult {
+	return { content: [{ type: "text", text }], structuredContent: structured };
+}
+
+/**
  * Runs a tool with credentials, turning both absence and failure into something readable.
  *
  * @param work What to do once there are credentials.
  * @returns The tool result.
  */
 async function withCredentials(
-	work: (credentials: Credentials) => Promise<string>,
+	work: (credentials: Credentials) => Promise<string | ToolResult>,
 ): Promise<ToolResult> {
 	const credentials = loadCredentials();
 	// "mcp" rather than the default: the message names the first step, and here that step is the `login`
@@ -130,9 +197,13 @@ async function withCredentials(
  * @param work What to do.
  * @returns The tool result.
  */
-async function attempt(work: () => Promise<string>): Promise<ToolResult> {
+async function attempt(work: () => Promise<string | ToolResult>): Promise<ToolResult> {
 	try {
-		return say(await work());
+		// A string is the plain case — a tool with nothing structured to say. Anything else is already a
+		// result, built by `report` because the tool declares an `outputSchema`.
+		const answer = await work();
+
+		return typeof answer === "string" ? say(answer) : answer;
 	} catch (error) {
 		// The message rather than the stack: these are read in a chat, and every one of them is either the
 		// API's own `detail` or a sentence this package wrote.
@@ -190,6 +261,10 @@ export function createServer(): McpServer {
 				"",
 				"Publishing over an existing site replaces what it serves, so ask before doing that to a",
 				"site the person did not name.",
+				"",
+				"delete_site is permanent and frees the subdomain for anybody to claim. Ask the person for",
+				"the subdomain and pass what they say as `confirm` — do not fill it in from what you already",
+				"know, because being told it is the point of the step.",
 			].join("\n"),
 		},
 	);
@@ -274,12 +349,15 @@ export function createServer(): McpServer {
 					.optional()
 					.describe("Subdomain or site id to publish over. Omit to create a new site."),
 			},
+			outputSchema: PUBLISH_OUTPUT,
 			annotations: REPLACES_A_SITE,
 		},
 		({ files, site }) =>
-			withCredentials(async (credentials) =>
-				describe(await publishFiles(credentials, files, site)),
-			),
+			withCredentials(async (credentials) => {
+				const result = await publishFiles(credentials, files, site);
+
+				return report(describe(result), { ...result });
+			}),
 	);
 
 	server.registerTool(
@@ -296,12 +374,66 @@ export function createServer(): McpServer {
 					.optional()
 					.describe("Subdomain or site id to publish over. Omit to create a new site."),
 			},
+			outputSchema: PUBLISH_OUTPUT,
 			annotations: REPLACES_A_SITE,
 		},
 		({ path, site }) =>
-			withCredentials(async (credentials) =>
-				describe(await publishDirectory(credentials, path, site)),
-			),
+			withCredentials(async (credentials) => {
+				const result = await publishDirectory(credentials, path, site);
+
+				return report(describe(result), { ...result });
+			}),
+	);
+
+	server.registerTool(
+		"delete_site",
+		{
+			title: "Delete a site",
+			description:
+				"Takes a site down permanently — its files, its history and its subdomain. Nothing here " +
+				"undoes it, and the subdomain becomes available for anybody to claim. Requires `confirm` " +
+				"to repeat the site's own subdomain exactly; ask the person for it rather than filling it " +
+				"in from what you already know, because that is the step this asks for.",
+			inputSchema: {
+				site: z.string().min(1).describe("Subdomain or site id to delete."),
+				confirm: z
+					.string()
+					.min(1)
+					.describe(
+						"The subdomain of the site being deleted, repeated exactly. A mismatch refuses the " +
+							"call rather than guessing which site was meant.",
+					),
+			},
+			outputSchema: {
+				siteId: z.string().describe("Identifier of the site that was deleted."),
+				subdomain: z.string().describe("Its subdomain, now unclaimed."),
+			},
+			annotations: REMOVES_A_SITE,
+		},
+		({ site, confirm }) =>
+			withCredentials(async (credentials) => {
+				// Resolved first, so `confirm` is compared against the site that would actually go — not
+				// against what was typed. Passing an id as `site` and its subdomain as `confirm` is the
+				// normal case, and the two are only the same string by coincidence.
+				const found = await findSite(credentials, site);
+
+				if (confirm.trim().toLowerCase() !== found.subdomain.toLowerCase()) {
+					// Thrown rather than returned, so it travels the same path as an API failure and arrives
+					// as `isError`. A refusal that reads like a successful answer is worse than no check.
+					throw new Error(
+						`Refusing to delete ${found.subdomain}: \`confirm\` said "${confirm}". ` +
+							"Repeat the subdomain exactly to go ahead.",
+					);
+				}
+
+				await deleteSite(credentials, found.siteId);
+
+				return report(
+					`Deleted ${found.subdomain}. Its files and history are gone, and the subdomain is free ` +
+						"for anybody to claim.",
+					{ siteId: found.siteId, subdomain: found.subdomain },
+				);
+			}),
 	);
 
 	server.registerTool(
@@ -310,18 +442,24 @@ export function createServer(): McpServer {
 			title: "List sites",
 			description: "Lists the sites on this account, so a publish can go to one of them.",
 			inputSchema: {},
+			outputSchema: { sites: z.array(SITE_OUTPUT).describe("Every site on this account.") },
 			annotations: READS_ONLY,
 		},
 		() =>
 			withCredentials(async (credentials) => {
 				const sites = await listSites(credentials);
-				if (sites.length === 0) {
-					return "No sites on this account yet. Publishing without a `site` creates one.";
-				}
+				// The empty case still carries the empty array. A tool that answers a sentence here and a
+				// structure everywhere else makes "no sites" the one branch a caller has to read English for.
+				const text =
+					sites.length === 0
+						? "No sites on this account yet. Publishing without a `site` creates one."
+						: sites
+								.map(
+									(site) => `${site.subdomain} — ${site.url}${site.name ? ` — ${site.name}` : ""}`,
+								)
+								.join("\n");
 
-				return sites
-					.map((site) => `${site.subdomain} — ${site.url}${site.name ? ` — ${site.name}` : ""}`)
-					.join("\n");
+				return report(text, { sites: sites.map((site) => ({ ...site })) });
 			}),
 	);
 

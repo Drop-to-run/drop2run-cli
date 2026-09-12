@@ -66,6 +66,7 @@ lose it.
 | `publish_files` | Publishes files Claude wrote — a page, a markdown note, several files together |
 | `publish_dir` | Publishes a folder, given its absolute path |
 | `list_sites` | Lists the sites on the account |
+| `delete_site` | Deletes a site permanently, subdomain included — requires the subdomain repeated as `confirm` |
 
 Both publish tools take an optional `site` — a subdomain or site id to publish over. Leave it out and a
 new site is created.

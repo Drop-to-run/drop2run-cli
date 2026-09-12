@@ -61,9 +61,9 @@ describe("the MCPB manifest", () => {
 		// `build.ssr` ignores `lib.fileName` and names the output after its entry, so this pair has come
 		// apart once already: the build wrote `mcpb.js` while the manifest asked for `server/index.js`.
 		expect(manifest.server.entry_point).toBe("server/index.js");
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: `${__dirname}` is MCPB's own substitution
-		// syntax, expanded by the host at launch. A template literal here would resolve it in this file,
-		// which is the one place it must not be resolved.
+		// The argument below is MCPB's own substitution syntax, expanded by the host at launch. A template
+		// literal here would resolve it in this file, which is the one place it must not be resolved.
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: see above
 		expect(manifest.server.mcp_config.args).toEqual(["${__dirname}/server/index.js"]);
 	});
 

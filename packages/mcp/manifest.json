@@ -48,6 +48,10 @@
 		{
 			"name": "list_sites",
 			"description": "Lists the sites on this account, so a publish can go to one of them."
+		},
+		{
+			"name": "delete_site",
+			"description": "Takes a site down permanently, including its subdomain. Requires the subdomain repeated back as confirmation."
 		}
 	],
 	"compatibility": {

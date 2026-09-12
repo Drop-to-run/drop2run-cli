@@ -61,10 +61,11 @@ afterEach(async () => {
 });
 
 describe("the tool surface", () => {
-	it("offers exactly the five tools the README documents", async () => {
+	it("offers exactly the six tools the README documents", async () => {
 		const { tools } = await (await connect()).listTools();
 
 		expect(tools.map((tool) => tool.name).sort()).toEqual([
+			"delete_site",
 			"list_sites",
 			"login",
 			"login_code",
@@ -110,6 +111,62 @@ describe("the tool surface", () => {
 		const listSites = tools.find((tool) => tool.name === "list_sites");
 
 		expect(listSites?.inputSchema.required ?? []).toEqual([]);
+	});
+
+	it("will not delete a site without the subdomain repeated back", async () => {
+		// The confirmation is a required argument rather than a boolean, and required is the half that
+		// matters: an optional `confirm` is one a model omits, and a `force: true` flag is one it sets.
+		// Repeating the subdomain is something it can only do by having been told which site is meant.
+		const { tools } = await (await connect()).listTools();
+		const deleteSite = tools.find((tool) => tool.name === "delete_site");
+
+		expect(deleteSite?.inputSchema.required?.sort()).toEqual(["confirm", "site"]);
+	});
+});
+
+describe("what the tools answer with", () => {
+	/**
+	 * Output schemas as the client receives them, keyed by tool name.
+	 *
+	 * @returns Every tool's declared output schema, or undefined where there is none.
+	 */
+	async function outputSchemas(): Promise<Record<string, Record<string, unknown> | undefined>> {
+		const { tools } = await (await connect()).listTools();
+
+		return Object.fromEntries(
+			tools.map((tool) => [tool.name, tool.outputSchema as Record<string, unknown> | undefined]),
+		);
+	}
+
+	it("describes a publish as fields, not only as a sentence", async () => {
+		// "Publish this, then send me the link" is the shape most of these requests take, and without a
+		// schema the link has to be read back out of English before anything can use it.
+		const schemas = await outputSchemas();
+
+		for (const name of ["publish_files", "publish_dir"]) {
+			expect(Object.keys((schemas[name]?.properties as object) ?? {}).sort(), name).toEqual([
+				"files",
+				"siteId",
+				"subdomain",
+				"unchanged",
+				"url",
+			]);
+		}
+	});
+
+	it("describes a site listing as fields", async () => {
+		const schemas = await outputSchemas();
+
+		expect(Object.keys((schemas.list_sites?.properties as object) ?? {})).toEqual(["sites"]);
+	});
+
+	it("leaves the sign-in tools unstructured, having nothing to structure", async () => {
+		// Not an oversight. They answer with what a person should do next, which is prose by nature, and
+		// declaring a schema that says nothing would make the schemas mean less everywhere else.
+		const schemas = await outputSchemas();
+
+		expect(schemas.login).toBeUndefined();
+		expect(schemas.login_code).toBeUndefined();
 	});
 });
 
@@ -172,6 +229,17 @@ describe("what each tool admits it does", () => {
 		expect(hints.list_sites?.readOnlyHint).toBe(true);
 		expect(hints.list_sites).not.toHaveProperty("destructiveHint");
 		expect(hints.list_sites).not.toHaveProperty("idempotentHint");
+	});
+
+	it("marks deleting a site destructive, and not idempotent", async () => {
+		// The one call here nothing undoes. `idempotentHint` false is not bookkeeping: a second delete
+		// fails to find anything, and a client told otherwise would retry into an error and read it as a
+		// transient one.
+		const hints = await annotations();
+
+		expect(hints.delete_site?.readOnlyHint).toBe(false);
+		expect(hints.delete_site?.destructiveHint).toBe(true);
+		expect(hints.delete_site?.idempotentHint).toBe(false);
 	});
 
 	it("admits every tool reaches dropto.run", async () => {
