@@ -1,4 +1,9 @@
-import { type DeploySource, deploy, type ProgressEvent } from "@drop2run/core";
+import {
+	type DeploySource,
+	deploy,
+	type ProgressEvent,
+	type ProgressListener,
+} from "@drop2run/core";
 import { createSite, listSites, type SiteSummary } from "./api.js";
 import type { Credentials } from "./config.js";
 import { directorySource } from "./source.js";
@@ -48,9 +53,12 @@ async function resolveSite(credentials: Credentials, site?: string): Promise<Sit
 	);
 
 	if (found === undefined) {
+		// Named without naming a tool: the same sentence reaches a chat calling `list_sites` and a person
+		// who typed `drop2run deploy`, and telling the second one to call an MCP tool sends them looking
+		// for a command that does not exist.
 		throw new Error(
-			`No site of yours is called "${site}". Leave the site out to publish to a new one, or use ` +
-				"list_sites to see what exists.",
+			`No site of yours is called "${site}". Leave the site out to publish to a new one, or list ` +
+				"your sites to see what exists.",
 		);
 	}
 
@@ -63,6 +71,8 @@ async function resolveSite(credentials: Credentials, site?: string): Promise<Sit
  * @param credentials Token and base URL.
  * @param source Where the files come from.
  * @param site Subdomain or site id to publish to, or undefined for a new site.
+ * @param onProgress Receives every stage the engine reports, for a caller that has somewhere to draw
+ * them. A tool returning one message does not pass this; a terminal that can rewrite a line does.
  * @returns What to tell the caller.
  * @throws Error when the deploy fails, carrying the engine's message.
  */
@@ -70,6 +80,7 @@ export async function publish(
 	credentials: Credentials,
 	source: DeploySource,
 	site?: string,
+	onProgress?: ProgressListener,
 ): Promise<PublishResult> {
 	const target = await resolveSite(credentials, site);
 
@@ -97,6 +108,10 @@ export async function publish(
 			// it being dropped on the way to a terminal.
 			failureDetail = event.detail;
 		}
+
+		// After recording rather than before, so a listener that throws cannot cost the result the facts
+		// this publish already knows.
+		onProgress?.(event);
 	};
 
 	await deploy(source, target.siteId, record, undefined, {
@@ -124,14 +139,16 @@ export async function publish(
  * @param credentials Token and base URL.
  * @param directory Absolute path of the folder to publish.
  * @param site Subdomain or site id, or undefined for a new site.
+ * @param onProgress Receives every stage the engine reports. See {@link publish}.
  * @returns What to tell the caller.
  */
 export function publishDirectory(
 	credentials: Credentials,
 	directory: string,
 	site?: string,
+	onProgress?: ProgressListener,
 ): Promise<PublishResult> {
-	return publish(credentials, directorySource(directory), site);
+	return publish(credentials, directorySource(directory), site, onProgress);
 }
 
 /** One file a caller wrote, rather than one read off a disk. */

@@ -18,6 +18,14 @@ export type ProgressEvent =
 			total: number;
 			bytes: number;
 			reused: number;
+			/**
+			 * Path of the file that just landed, where the reporter knows it. Uploads run several at a
+			 * time, so this is the most recent one to finish rather than the only one in flight — enough
+			 * for a terminal to show what is moving, not a log of the order things happened in.
+			 *
+			 * Optional because a caller that only draws a bar has no use for it.
+			 */
+			path?: string;
 	  }
 	| { type: "completing"; reused: number }
 	/**

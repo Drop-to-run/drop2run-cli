@@ -59,7 +59,8 @@ export interface UploadDeps {
  * @param targets Upload permits from the prepare endpoint.
  * @param uploadUrl The one endpoint every permit is presented to, also from the prepare endpoint.
  * @param files The hashed manifest, used to find the bytes for each target.
- * @param onProgress Called after each successful upload with counts and cumulative bytes.
+ * @param onProgress Called after each successful upload with counts, cumulative bytes, and the path
+ * that just landed.
  * @param signal Cancels in-flight and queued uploads.
  * @param deps Overrides for testing.
  * @throws DeployError When a file still fails after every retry, or when cancelled.
@@ -68,7 +69,7 @@ export async function uploadAll(
 	targets: readonly UploadTarget[],
 	uploadUrl: string,
 	files: readonly ManifestFile[],
-	onProgress?: (done: number, total: number, bytes: number) => void,
+	onProgress?: (done: number, total: number, bytes: number, path: string) => void,
 	signal?: AbortSignal,
 	deps: UploadDeps = {},
 ): Promise<void> {
@@ -113,7 +114,7 @@ export async function uploadAll(
 
 			done += 1;
 			uploadedBytes += file.bytes.length;
-			onProgress?.(done, targets.length, uploadedBytes);
+			onProgress?.(done, targets.length, uploadedBytes, file.path);
 		}
 	};
 

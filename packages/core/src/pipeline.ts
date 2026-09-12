@@ -113,13 +113,14 @@ export async function deploy(
 			prepared.upload,
 			prepared.uploadUrl,
 			hashed,
-			(done, _total, bytes) =>
+			(done, _total, bytes, path) =>
 				onProgress({
 					type: "uploading",
 					done: prepared.reused + done,
 					total: prepared.total,
 					bytes,
 					reused: prepared.reused,
+					path,
 				}),
 			signal,
 			options.upload,

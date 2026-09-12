@@ -31,6 +31,7 @@ import {
 	waitForCallback,
 	writeProject,
 } from "@drop2run/node";
+import { type ProgressWriter, silentProgress } from "./progress.js";
 
 /**
  * What each subcommand does, separated from how it was typed.
@@ -338,13 +339,19 @@ export async function list(): Promise<CommandResult> {
  * The same order decides the folder, so `drop2run deploy` in a project with `dir: "dist"` publishes
  * `dist` rather than the repository around it.
  *
+ * <b>It says what it is doing while it does it.</b> A deploy is the one command here that takes long
+ * enough for silence to read as a hang, and the engine has always reported its stages — the CLI simply
+ * dropped them. They go to stderr, so a shell reading stdout still gets the URL and nothing else.
+ *
  * @param directory Folder to publish, or undefined to use the project file and then the working directory.
  * @param site Subdomain or site id to publish over, or undefined to use the project file.
+ * @param report Receives progress, injectable so a test does not print and `--json` can suppress it.
  * @returns The result.
  */
 export async function deployCommand(
 	directory: string | undefined,
 	site?: string,
+	report: ProgressWriter = silentProgress,
 ): Promise<CommandResult> {
 	const found = credentialsOr();
 	if ("result" in found) return found.result;
@@ -354,7 +361,7 @@ export async function deployCommand(
 	const folder = directory ?? project?.dir ?? ".";
 
 	try {
-		const result = await publishDirectory(found.credentials, resolve(folder), target);
+		const result = await publishDirectory(found.credentials, resolve(folder), target, report);
 		const what = result.unchanged
 			? "Already up to date — nothing needed publishing."
 			: `Published ${result.files.toLocaleString()} ${result.files === 1 ? "file" : "files"}.`;
@@ -366,6 +373,10 @@ export async function deployCommand(
 		};
 	} catch (error) {
 		return failureFrom(error);
+	} finally {
+		// In `finally` because a failed deploy leaves a half-drawn line too, and printing an error on top
+		// of it is how a message ends up with "Uploading 41/98" still attached to its tail.
+		report.done();
 	}
 }
 

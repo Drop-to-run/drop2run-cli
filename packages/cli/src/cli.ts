@@ -13,6 +13,7 @@ import {
 	where,
 	whoami,
 } from "./commands.js";
+import { progressWriter, silentProgress } from "./progress.js";
 
 /**
  * Parses the command line and runs the matching command.
@@ -128,9 +129,9 @@ export async function run(argv: readonly string[]): Promise<CommandResult> {
  * @param command First positional argument.
  * @param rest Remaining positional arguments.
  * @param site Value of `--site`, if given.
- * @param json Whether `--json` was asked for, which decides whether progress may be printed. Only
- * `login` needs it: it is the one command that says something while it waits, and prose interleaved with
- * a JSON document is not JSON.
+ * @param json Whether `--json` was asked for, which decides whether progress may be printed. `login`
+ * and `deploy` need it: they are the commands that say something while they work, and prose interleaved
+ * with a JSON document is not JSON.
  * @param device Whether `--device` was given, which picks between the two sign-in flows.
  * @param confirmed Whether `--yes` was given, which is the only confirmation a deletion gets.
  * @returns The command's result.
@@ -157,10 +158,22 @@ async function dispatch(
 			return logout();
 		case "init":
 			return await init(rest[0] ?? ".", site);
-		case "deploy":
+		case "deploy": {
+			// Progress on stderr, for the same reason `login` puts it there: a shell reading stdout gets
+			// the URL and nothing else, with or without --json. Suppressed entirely under --json, where
+			// carriage returns interleaved with a JSON document are not a JSON document.
+			const report = json
+				? silentProgress
+				: progressWriter(
+						(text) => process.stderr.write(text),
+						process.stderr.isTTY === true,
+						process.stderr.columns ?? 80,
+					);
+
 			// Undefined rather than "." so `deployCommand` can tell "no folder given" from "this folder",
 			// which is what lets drop2run.json supply one.
-			return await deployCommand(rest[0], site);
+			return await deployCommand(rest[0], site, report);
+		}
 		case "ls":
 		case "list":
 			return await list();
