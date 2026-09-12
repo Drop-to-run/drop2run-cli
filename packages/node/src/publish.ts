@@ -200,15 +200,16 @@ function cleanPath(path: string): string {
  *
  * Text only, which is why a PDF has to come off a disk: these bytes arrive as a JSON string.
  *
+ * <b>`async` for the rejection rather than for an await.</b> The path checks run before anything is
+ * sent, and a plain function returning `Promise` would throw those synchronously — past every caller
+ * that handles a failed publish by catching the promise, which is all of them.
+ *
  * @param credentials Token and base URL.
  * @param files What to publish, each with a path relative to the site root.
  * @param site Subdomain or site id, or undefined for a new site.
  * @returns What to tell the caller.
  * @throws Error when a path names nothing usable, or two files claim the same one.
  */
-// `async` for the rejection rather than for an await: the path checks run before anything is sent, and
-// a plain function returning `Promise` would throw those synchronously — past every caller that handles
-// a failed publish by catching the promise, which is all of them.
 export async function publishFiles(
 	credentials: Credentials,
 	files: readonly AuthoredFile[],
