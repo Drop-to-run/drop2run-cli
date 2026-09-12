@@ -1,7 +1,8 @@
 {
 	"name": "@drop2run/mcp",
-	"version": "0.4.0",
+	"version": "0.4.1",
 	"description": "MCP server that publishes a folder or an HTML page to Drop2Run and returns a live URL.",
+	"mcpName": "run.dropto/drop2run",
 	"license": "MIT",
 	"type": "module",
 	"bin": {
