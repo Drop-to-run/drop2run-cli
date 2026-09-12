@@ -24,6 +24,7 @@ const manifest = JSON.parse(
 ) as {
 	name: string;
 	version: string;
+	author: { name: string; url: string };
 	server: { entry_point: string; mcp_config: { args: string[] } };
 	tools: { name: string; description: string }[];
 	privacy_policies?: string[];
@@ -64,6 +65,14 @@ describe("the MCPB manifest", () => {
 		// syntax, expanded by the host at launch. A template literal here would resolve it in this file,
 		// which is the one place it must not be resolved.
 		expect(manifest.server.mcp_config.args).toEqual(["${__dirname}/server/index.js"]);
+	});
+
+	it("points its author at a GitHub profile, not at the product", () => {
+		// The MCPB submission form asks for this specifically — "a valid manifest.json with the author
+		// field pointed at your GitHub profile" — and it read https://dropto.run until somebody read the
+		// form. The product's own site is the obvious thing to put there and the wrong one: this field
+		// says who maintains the extension, and the reviewer follows it to the account that publishes it.
+		expect(manifest.author.url).toMatch(/^https:\/\/github\.com\//);
 	});
 
 	it("points at a privacy policy over https", () => {

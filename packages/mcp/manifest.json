@@ -7,7 +7,7 @@
 	"long_description": "Give Claude a folder, a page you just wrote, or a single markdown note, and get back a URL anyone can open.\n\nA site needs an `index.html` at its top level, or at least one `.md`, `.markdown` or `.pdf` file — those publish as a documents site and are read through a viewer, so a note is a whole publish that needs no wrapping in HTML.\n\nSigning in happens in a browser window; no token is pasted by hand and no command line is involved.",
 	"author": {
 		"name": "Drop2Run",
-		"url": "https://dropto.run"
+		"url": "https://github.com/Drop-to-run"
 	},
 	"homepage": "https://dropto.run",
 	"documentation": "https://dropto.run/docs/mcp",
