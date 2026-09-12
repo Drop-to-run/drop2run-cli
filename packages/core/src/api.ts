@@ -9,6 +9,15 @@ import type { UploadTarget } from "./upload.js";
  * types still have to match `packages/contracts/generated.ts`.
  */
 
+/**
+ * The header naming the account a request acts on. Mirrors `ICurrentAccount.AccountHeaderName`.
+ *
+ * Exported so the browser and the CLI spell it the same way. A second spelling of it would be a header
+ * silently ignored by the server, which is indistinguishable from acting on the right account until the
+ * day it is not.
+ */
+export const ACCOUNT_HEADER = "X-Drop2Run-Account";
+
 /** Header carrying the claim token of an anonymous site, mirroring the API constant. */
 export const CLAIM_TOKEN_HEADER = "X-Claim-Token";
 
@@ -86,6 +95,18 @@ export interface ApiOptions {
 	 * passes it.
 	 */
 	readonly token?: string;
+	/**
+	 * Account to publish to, when the caller belongs to more than one.
+	 *
+	 * Sent as a header for the same reason the browser stores the choice rather than the server: the
+	 * server reads membership on every request, so this only selects among accounts it already agrees
+	 * the caller is in — an unrecognised value is refused, not honoured.
+	 *
+	 * Left unset, the server resolves the caller's own account, which is the right answer for everybody
+	 * who has never switched. It matters most here of anywhere: a deploy that omitted it from a page
+	 * describing a team would publish to the caller's personal account and report success.
+	 */
+	readonly accountId?: string;
 	/** Overridable for tests. Defaults to the global `fetch`. */
 	readonly fetch?: typeof fetch;
 }
@@ -209,6 +230,7 @@ async function request<T>(
 	if (body !== undefined) headers["Content-Type"] = "application/json";
 	if (options.claimToken) headers[CLAIM_TOKEN_HEADER] = options.claimToken;
 	if (options.token) headers.Authorization = `Bearer ${options.token}`;
+	if (options.accountId) headers[ACCOUNT_HEADER] = options.accountId;
 
 	const response = await doFetch(`${base}/${path}`, {
 		method: "POST",
