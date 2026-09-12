@@ -3,7 +3,7 @@
 	"name": "run.dropto/drop2run",
 	"title": "Drop2Run",
 	"description": "Publishes a folder, an HTML page, or a markdown note as a static site and returns a live HTTPS URL.",
-	"version": "0.4.2",
+	"version": "0.4.3",
 	"websiteUrl": "https://dropto.run",
 	"repository": {
 		"url": "https://github.com/Drop-to-run/drop2run-cli",
@@ -21,7 +21,7 @@
 			"registryType": "npm",
 			"registryBaseUrl": "https://registry.npmjs.org",
 			"identifier": "@drop2run/mcp",
-			"version": "0.4.2",
+			"version": "0.4.3",
 			"transport": {
 				"type": "stdio"
 			}
