@@ -28,15 +28,19 @@ uses a `DROP2RUN_TOKEN` from <https://dropto.run/account/tokens>. The other comm
 `ls`, `open`, `rollback`, `rm`, `token list`, `whoami` and `where`, and `--json` on any of them
 prints machine-readable output.
 
-The MCP server is registered with a client rather than run by hand — one command for Claude Code:
+The MCP server is registered with a client rather than run by hand. Claude for macOS and Windows
+installs it from a bundle — download [`drop2run.mcpb`](https://dropto.run/drop2run.mcpb) and open it,
+and there is no config file and nothing to install first. Claude Code takes one command:
 
 ```bash
 claude mcp add drop2run -s user -- npx -y @drop2run/mcp
 ```
 
-It exposes five tools — `publish_files`, `publish_dir`, `list_sites`, and `login` / `login_code` to get
-a token without leaving the chat. The token goes to the same place the CLI stores one, so signing in
-through either covers both.
+It exposes six tools — `publish_files`, `publish_dir`, `list_sites`, `delete_site`, and `login` /
+`login_code` to get a token without leaving the chat. The publishes answer with structured fields
+beside the sentence, so a URL does not have to be read back out of prose; `delete_site` is permanent
+and asks for the site's subdomain repeated back before it runs. The token goes to the same place the
+CLI stores one, so signing in through either covers both.
 
 Each package documents itself in full, including the sign-in flows and what happens without a
 `site`: [`packages/cli/README.md`](packages/cli/README.md) and
