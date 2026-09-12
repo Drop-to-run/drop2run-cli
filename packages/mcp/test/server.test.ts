@@ -113,6 +113,88 @@ describe("the tool surface", () => {
 	});
 });
 
+describe("what each tool admits it does", () => {
+	/**
+	 * Annotations as the client receives them, keyed by tool name.
+	 *
+	 * Read back over the protocol rather than imported from the source, because the assertion worth
+	 * making is about what reaches a host: a constant declared and then not passed to `registerTool`
+	 * would satisfy an import and tell a client nothing.
+	 *
+	 * @returns Every tool's annotations.
+	 */
+	async function annotations(): Promise<Record<string, Record<string, unknown>>> {
+		const { tools } = await (await connect()).listTools();
+
+		return Object.fromEntries(
+			tools.map((tool) => [tool.name, (tool.annotations ?? {}) as Record<string, unknown>]),
+		);
+	}
+
+	it("marks both publishes destructive", async () => {
+		// The hint a host reads to decide whether to ask first. Publishing over a subdomain takes down
+		// the pages that were there, and a person who is not asked finds out from the URL.
+		const hints = await annotations();
+
+		for (const name of ["publish_files", "publish_dir"]) {
+			expect(hints[name]?.readOnlyHint, name).toBe(false);
+			expect(hints[name]?.destructiveHint, name).toBe(true);
+		}
+	});
+
+	it("does not let a publish claim to be idempotent", async () => {
+		// True of an identical publish to a named site, which answers "already live" — and false of the
+		// same call with `site` omitted, which makes one more site every run. The tool cannot tell which
+		// it is from the annotation, so it claims the weaker thing.
+		const hints = await annotations();
+
+		for (const name of ["publish_files", "publish_dir"]) {
+			expect(hints[name]?.idempotentHint, name).toBe(false);
+		}
+	});
+
+	it("marks signing in as a write, but not as a destructive one", async () => {
+		// It stores a credential; it does not replace anything the person owns. Marking it destructive
+		// would train a host to confirm the one tool whose whole job is to be run when nothing works yet.
+		const hints = await annotations();
+
+		for (const name of ["login", "login_code"]) {
+			expect(hints[name]?.readOnlyHint, name).toBe(false);
+			expect(hints[name]?.destructiveHint, name).toBe(false);
+		}
+	});
+
+	it("marks listing sites read-only, and leaves the write hints off it", async () => {
+		// The spec gives `destructiveHint` and `idempotentHint` meaning only when `readOnlyHint` is
+		// false. Present-but-safe-looking values here would read as a judgement that was never made.
+		const hints = await annotations();
+
+		expect(hints.list_sites?.readOnlyHint).toBe(true);
+		expect(hints.list_sites).not.toHaveProperty("destructiveHint");
+		expect(hints.list_sites).not.toHaveProperty("idempotentHint");
+	});
+
+	it("admits every tool reaches dropto.run", async () => {
+		// None of the five is answerable from this machine alone, so none of them may look local.
+		const hints = await annotations();
+
+		for (const [name, hint] of Object.entries(hints)) {
+			expect(hint.openWorldHint, name).toBe(true);
+		}
+	});
+
+	it("leaves no tool to the spec's defaults", async () => {
+		// The reason to be explicit at all: an omitted `destructiveHint` defaults to true, so a tool that
+		// says nothing is read as destructive. Silence here is a claim, and it is usually the wrong one.
+		const hints = await annotations();
+
+		for (const [name, hint] of Object.entries(hints)) {
+			expect(hint.readOnlyHint, name).toBeTypeOf("boolean");
+			expect(hint.openWorldHint, name).toBeTypeOf("boolean");
+		}
+	});
+});
+
 describe("the instructions", () => {
 	it("warn that publishing over a site replaces it", async () => {
 		// The one thing a model can do here that a person cannot undo. It belongs in the instructions

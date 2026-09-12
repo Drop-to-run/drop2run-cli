@@ -32,6 +32,64 @@ import { MAX_WAIT_SECONDS, signInWithBrowser, signInWithCode } from "./auth.js";
  */
 const SERVER_VERSION = "0.4.1";
 
+/**
+ * How the tools below describe their own effects to a client.
+ *
+ * These are the hints a host reads to decide what to confirm with the person before running, so they
+ * are a safety surface rather than documentation: a tool that replaces a live website while claiming
+ * to be read-only is asking to be run without being shown. Anthropic's connector review treats a wrong
+ * hint as a rejection, and the SDK's silence is the reason to be explicit — the spec's default for
+ * `destructiveHint` is true, so a tool that omits it is read as destructive whether or not it is, and
+ * `list_sites` would be confirmed like a publish.
+ *
+ * `openWorldHint` is true on every one of them: all five talk to dropto.run, and none of them is
+ * answerable from this machine alone.
+ */
+
+/**
+ * Stores a token where the other tools will find it.
+ *
+ * Not read-only — it writes a credential file — but not destructive either: nothing the person owns is
+ * replaced, and `replace` swaps a token the caller asked to swap. Not idempotent, because a second
+ * successful sign-in can land on a different account than the first.
+ */
+const CREDENTIAL_WRITE = {
+	readOnlyHint: false,
+	destructiveHint: false,
+	idempotentHint: false,
+	openWorldHint: true,
+} as const;
+
+/**
+ * Replaces what a site serves.
+ *
+ * Destructive on purpose and not as a formality: publishing over an existing subdomain takes down the
+ * pages that were there. That it is cheap for us to do — a KV flip onto an immutable deploy — says
+ * nothing to the person whose URL now shows something else, which is who the hint is for.
+ *
+ * Not idempotent, and the reason is the `site` argument rather than the content: an identical publish
+ * to a named site answers "already live" and writes no new version, but the same call with `site`
+ * omitted creates one more site every time it runs.
+ */
+const REPLACES_A_SITE = {
+	readOnlyHint: false,
+	destructiveHint: true,
+	idempotentHint: false,
+	openWorldHint: true,
+} as const;
+
+/**
+ * Reads and changes nothing.
+ *
+ * `destructiveHint` and `idempotentHint` are left off rather than set to safe-looking values: the spec
+ * gives them meaning only when `readOnlyHint` is false, and writing them here would suggest this tool
+ * was weighed on a scale that does not apply to it.
+ */
+const READS_ONLY = {
+	readOnlyHint: true,
+	openWorldHint: true,
+} as const;
+
 /** What a tool hands back to the client. */
 type ToolResult = {
 	content: { type: "text"; text: string }[];
@@ -161,6 +219,7 @@ export function createServer(): McpServer {
 							"when the stored token is being refused.",
 					),
 			},
+			annotations: CREDENTIAL_WRITE,
 		},
 		({ waitSeconds, replace }) => attempt(() => signInWithBrowser(waitSeconds, replace)),
 	);
@@ -183,6 +242,7 @@ export function createServer(): McpServer {
 					.describe("How long a waiting call polls before answering. Default 120."),
 				replace: z.boolean().optional().describe("Sign in even though a token is already stored."),
 			},
+			annotations: CREDENTIAL_WRITE,
 		},
 		({ waitSeconds, replace }) => attempt(() => signInWithCode(waitSeconds, replace)),
 	);
@@ -214,6 +274,7 @@ export function createServer(): McpServer {
 					.optional()
 					.describe("Subdomain or site id to publish over. Omit to create a new site."),
 			},
+			annotations: REPLACES_A_SITE,
 		},
 		({ files, site }) =>
 			withCredentials(async (credentials) =>
@@ -235,6 +296,7 @@ export function createServer(): McpServer {
 					.optional()
 					.describe("Subdomain or site id to publish over. Omit to create a new site."),
 			},
+			annotations: REPLACES_A_SITE,
 		},
 		({ path, site }) =>
 			withCredentials(async (credentials) =>
@@ -248,6 +310,7 @@ export function createServer(): McpServer {
 			title: "List sites",
 			description: "Lists the sites on this account, so a publish can go to one of them.",
 			inputSchema: {},
+			annotations: READS_ONLY,
 		},
 		() =>
 			withCredentials(async (credentials) => {
