@@ -88,6 +88,48 @@ function flagValue(args: readonly string[], flag: string): string | undefined {
 }
 
 /**
+ * Flags that take a value, so the word after them is theirs and not a positional argument.
+ *
+ * Kept as one list because the parser has two questions about a flag — what its value is, and whether
+ * the next word belongs to it — and answering them from two lists is how they disagree.
+ */
+const VALUE_FLAGS = ["--site", "--subdomain"];
+
+/**
+ * Pulls out the positional arguments, leaving flags and the values that belong to them behind.
+ *
+ * <b>What it fixes.</b> Filtering on "does not start with a dash" keeps the value of every flag, so
+ * `deploy --subdomain my-docs` read `my-docs` as the folder to publish and failed on a path that does
+ * not exist. `--site` had it too, and had it from the start: `deploy --site calm-cedar` published a
+ * directory called `calm-cedar`, which is why every example in the documentation names the folder
+ * first — the bug was invisible as long as a positional came before the flag.
+ *
+ * @param argv Arguments after the program name.
+ * @returns The positional arguments, in order.
+ */
+function positionals(argv: readonly string[]): string[] {
+	const found: string[] = [];
+
+	for (let at = 0; at < argv.length; at++) {
+		const argument = argv[at];
+		if (argument === undefined) continue;
+
+		if (VALUE_FLAGS.includes(argument)) {
+			const value = argv[at + 1];
+
+			// Only skip a real value. A flag at the end, or one followed by another flag, has none — and
+			// swallowing the next word there would eat the command itself.
+			if (value !== undefined && !value.startsWith("-")) at++;
+			continue;
+		}
+
+		if (!argument.startsWith("-")) found.push(argument);
+	}
+
+	return found;
+}
+
+/**
  * Says why `--subdomain` cannot be honoured as typed, if it cannot.
  *
  * <b>Three ways to get it wrong, and each is refused rather than absorbed.</b> A flag with nothing after
@@ -140,7 +182,7 @@ function subdomainFlagProblem(
  */
 export async function run(argv: readonly string[]): Promise<CommandResult> {
 	const json = argv.includes("--json");
-	const positional = argv.filter((argument) => !argument.startsWith("-"));
+	const positional = positionals(argv);
 	const [command, ...rest] = positional;
 
 	if (argv.includes("--version")) {

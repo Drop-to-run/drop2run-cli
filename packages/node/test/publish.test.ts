@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Credentials } from "../src/config.js";
-import { publishFiles } from "../src/publish.js";
+import { publishDirectory, publishFiles } from "../src/publish.js";
 
 /**
  * Which site a publish goes to, and what the request carries.
@@ -198,6 +198,25 @@ describe("publishing to a new site under a name the caller picked", () => {
 		expect(
 			seen.some((request) => request.method === "GET" && request.url.endsWith("/api/sites")),
 		).toBe(false);
+	});
+
+	it("is not created when the folder to publish does not exist", async () => {
+		// The order was the other way round and it cost a name permanently: the site was created, the
+		// directory read then failed, and the subdomain that had been asked for was held by an empty
+		// site nobody wanted. Retrying with the same name answered "already taken" — by the first try.
+		const seen = stubApi([]);
+
+		await expect(
+			publishDirectory(
+				credentials,
+				"/tmp/drop2run-no-such-folder",
+				undefined,
+				undefined,
+				"my-docs",
+			),
+		).rejects.toThrow(/no folder/);
+
+		expect(seen).toEqual([]);
 	});
 
 	it("refuses a site and a subdomain together rather than guessing which was meant", async () => {

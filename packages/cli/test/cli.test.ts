@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -447,5 +447,85 @@ describe("--subdomain", () => {
 
 		expect(result.code).toBe(1);
 		expect(result.text).toContain("already taken");
+	});
+});
+
+describe("a flag's value", () => {
+	/** A folder to publish, so a deploy that reads the right one has something to read. */
+	let folder: string;
+	let realCwd: string;
+
+	beforeEach(() => {
+		folder = mkdtempSync(join(tmpdir(), "drop2run-cli-site-"));
+		writeFileSync(join(folder, "index.html"), "<!doctype html><title>Page</title>");
+		realCwd = process.cwd();
+		process.chdir(folder);
+	});
+
+	afterEach(() => {
+		process.chdir(realCwd);
+	});
+
+	it("is not read as the folder to publish", async () => {
+		// Reported from a real terminal: `deploy --subdomain test11223355` answered "no such file or
+		// directory … /test11223355". The parser kept every word that did not start with a dash, so the
+		// name of the site became the name of the directory. `--site` had the same defect and had it
+		// first; it hid because every example in the documentation names the folder before the flag.
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const paths: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL, init?: RequestInit) => {
+				const url = String(input);
+				paths.push(url);
+
+				if (url.endsWith("/sites") && init?.method === "POST") {
+					return Response.json({
+						siteId: "01JNEW",
+						subdomain: "my-docs",
+						url: "https://my-docs.dropto.live",
+					});
+				}
+
+				if (url.includes("/deploys/prepare")) {
+					return Response.json({
+						deployId: "01JDEPLOY",
+						total: 1,
+						reused: 0,
+						upload: [{ path: "index.html", token: "permit", sha256: "x".repeat(64) }],
+						uploadUrl: "https://storage.test/v1/object",
+					});
+				}
+
+				if (url.startsWith("https://storage.test/")) return new Response(null, { status: 200 });
+
+				return Response.json({ url: "https://my-docs.dropto.live", name: "Page" });
+			}),
+		);
+
+		// `--json` here only to keep the progress writer off this suite's output; the parsing under test
+		// happens before either branch.
+		const result = await run(["deploy", "--subdomain", "my-docs", "--json"]);
+
+		// It published the working directory, which is what `deploy` with no folder has always meant.
+		expect(result.code).toBe(0);
+		expect(result.text).toContain("my-docs.dropto.live");
+	});
+});
+
+describe("a folder that is not there", () => {
+	it("is refused before a site is created for it", async () => {
+		// The order used to be the other way round, and the cost was permanent: the site was made, the
+		// read then failed, and the subdomain that had been asked for was held by an empty site. Trying
+		// again with the same name answered "already taken" — by the wreckage of the first attempt.
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const fetched = vi.fn(async () => Response.json({}));
+		vi.stubGlobal("fetch", fetched);
+
+		const result = await run(["deploy", "/tmp/drop2run-no-such-folder", "--subdomain", "my-docs"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("drop2run-no-such-folder");
+		expect(fetched).not.toHaveBeenCalled();
 	});
 });
