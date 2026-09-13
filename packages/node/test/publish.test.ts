@@ -30,6 +30,8 @@ interface Recorded {
 	readonly url: string;
 	readonly method: string;
 	readonly authorization: string | null;
+	/** What was sent, for the one request whose body is the thing under test: creating a site. */
+	readonly body: string | null;
 }
 
 /**
@@ -50,6 +52,7 @@ function stubApi(sites: unknown[] = []): Recorded[] {
 				url,
 				method: init?.method ?? "GET",
 				authorization: headers.get("Authorization"),
+				body: typeof init?.body === "string" ? init.body : null,
 			});
 
 			if (url.endsWith("/api/sites") && (init?.method ?? "GET") === "GET") {
@@ -168,6 +171,43 @@ describe("publishing to a named site", () => {
 
 		await expect(publishFiles(credentials, [page], "not-mine")).rejects.toThrow(/not-mine/);
 		expect(seen.some((request) => request.method === "POST")).toBe(false);
+	});
+});
+
+describe("publishing to a new site under a name the caller picked", () => {
+	it("sends the name to the server rather than deciding anything about it here", async () => {
+		// Whether a name is allowed depends on the reserved list and on how many self-picked names the
+		// plan has left, and neither is knowable from here. A check in this package could only be a copy
+		// that disagrees — refusing a name the server would have taken, with wording nobody can act on.
+		const seen = stubApi([]);
+
+		await publishFiles(credentials, [page], undefined, "my-docs");
+
+		const created = seen.find(
+			(request) => request.method === "POST" && request.url.endsWith("/api/sites"),
+		);
+
+		expect(created?.body).toBe('{"subdomain":"my-docs"}');
+	});
+
+	it("does not look at the existing sites first, since the name is for one that does not exist", async () => {
+		const seen = stubApi([]);
+
+		await publishFiles(credentials, [page], undefined, "my-docs");
+
+		expect(
+			seen.some((request) => request.method === "GET" && request.url.endsWith("/api/sites")),
+		).toBe(false);
+	});
+
+	it("refuses a site and a subdomain together rather than guessing which was meant", async () => {
+		const seen = stubApi([]);
+
+		await expect(publishFiles(credentials, [page], "old-site", "my-docs")).rejects.toThrow(/both/);
+
+		// Nothing was created and nothing was published: a request that contradicts itself has no
+		// half-carried-out version worth leaving behind.
+		expect(seen).toEqual([]);
 	});
 });
 

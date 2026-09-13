@@ -251,6 +251,12 @@ export function createServer(): McpServer {
 				"publish to a brand-new site; pass a subdomain to publish over an existing one. list_sites",
 				"shows what already exists.",
 				"",
+				"A new site gets a generated name unless `subdomain` asks for one. Pass it when the person",
+				"named the address they want, and otherwise leave it out — a name is what somebody will be",
+				"given as a URL, it cannot be changed later, and a site created under a guessed one has to",
+				"be deleted by hand. `site` and `subdomain` are opposites: one publishes over a site that",
+				"exists, the other creates one that does not. Never pass both.",
+				"",
 				"A site needs an index.html at its top level, or at least one .md, .markdown or .pdf file,",
 				"which publishes as a documents site and is read through a viewer. So one page goes at",
 				"index.html, and a single note is a whole publish that needs no wrapping in HTML.",
@@ -348,13 +354,23 @@ export function createServer(): McpServer {
 					.string()
 					.optional()
 					.describe("Subdomain or site id to publish over. Omit to create a new site."),
+				subdomain: z
+					.string()
+					.optional()
+					.describe(
+						"Subdomain to create the new site under, when the person asked for a particular " +
+							"address. Only for a new site: leave it out to publish over an existing one, " +
+							"and do not pass it together with `site`. Ask rather than inventing one — the " +
+							"name is the URL somebody will be given, it cannot be changed afterwards, and " +
+							"an unused site made under a guessed name has to be deleted by hand.",
+					),
 			},
 			outputSchema: PUBLISH_OUTPUT,
 			annotations: REPLACES_A_SITE,
 		},
-		({ files, site }) =>
+		({ files, site, subdomain }) =>
 			withCredentials(async (credentials) => {
-				const result = await publishFiles(credentials, files, site);
+				const result = await publishFiles(credentials, files, site, subdomain);
 
 				return report(describe(result), { ...result });
 			}),
@@ -373,13 +389,23 @@ export function createServer(): McpServer {
 					.string()
 					.optional()
 					.describe("Subdomain or site id to publish over. Omit to create a new site."),
+				subdomain: z
+					.string()
+					.optional()
+					.describe(
+						"Subdomain to create the new site under, when the person asked for a particular " +
+							"address. Only for a new site: leave it out to publish over an existing one, " +
+							"and do not pass it together with `site`. Ask rather than inventing one — the " +
+							"name is the URL somebody will be given, it cannot be changed afterwards, and " +
+							"an unused site made under a guessed name has to be deleted by hand.",
+					),
 			},
 			outputSchema: PUBLISH_OUTPUT,
 			annotations: REPLACES_A_SITE,
 		},
-		({ path, site }) =>
+		({ path, site, subdomain }) =>
 			withCredentials(async (credentials) => {
-				const result = await publishDirectory(credentials, path, site);
+				const result = await publishDirectory(credentials, path, site, undefined, subdomain);
 
 				return report(describe(result), { ...result });
 			}),

@@ -35,6 +35,7 @@ const HELP = `drop2run — publish a static site from the command line
   drop2run logout                              Remove the stored token
   drop2run init [dir] [--site <subdomain>]     Tie this folder to a site (writes drop2run.json)
   drop2run deploy [dir] [--site <subdomain>]   Publish a folder (default: . or drop2run.json)
+  drop2run init|deploy --subdomain <name>      Create a new site under a name you pick
   drop2run ls                                  List your sites
   drop2run open [site]                         Open a site in a browser
   drop2run rollback <deployId> [--site X]      Put an earlier version back live
@@ -45,14 +46,19 @@ const HELP = `drop2run — publish a static site from the command line
   drop2run --version                           Print the version
 
 Flags
-  --json      Print machine-readable output instead of text
-  --site X    Act on an existing site rather than the one in drop2run.json
-  --device    Sign in by approving a code on another machine
-  --yes       Confirm a deletion, which cannot be undone
+  --json         Print machine-readable output instead of text
+  --site X       Act on an existing site rather than the one in drop2run.json
+  --subdomain X  Create a new site under this name (init and deploy only)
+  --device       Sign in by approving a code on another machine
+  --yes          Confirm a deletion, which cannot be undone
 
 Where a site comes from
-  --site, then drop2run.json, then a new one. \`init\` writes that file, so
-  \`deploy\` in the same folder needs no arguments at all.
+  --subdomain creates one under the name you give. Otherwise: --site, then
+  drop2run.json, then a new site with a generated name. \`init\` writes that
+  file, so \`deploy\` in the same folder needs no arguments at all.
+
+  --site only ever finds a site you already have; it never creates one, so a
+  subdomain typed wrong fails instead of quietly becoming a second site.
 
 Signing in
   \`login\` opens a browser and listens on 127.0.0.1, so it needs both on this
@@ -79,6 +85,51 @@ function flagValue(args: readonly string[], flag: string): string | undefined {
 
 	// A flag with nothing after it, or followed by another flag, is a typo rather than an empty value.
 	return value === undefined || value.startsWith("-") ? undefined : value;
+}
+
+/**
+ * Says why `--subdomain` cannot be honoured as typed, if it cannot.
+ *
+ * <b>Three ways to get it wrong, and each is refused rather than absorbed.</b> A flag with nothing after
+ * it parses as undefined, which would otherwise be indistinguishable from not passing it — and the
+ * silent outcome of that is a site created under a generated name by somebody who typed a flag
+ * specifically to avoid one. Given with `--site` it contradicts it: one names a site that must already
+ * exist, the other names one that must not. Given to a command that only ever acts on an existing site,
+ * it has nothing to do, and ignoring it would read as having worked.
+ *
+ * @param argv Every argument, needed to tell a flag with no value from an absent flag.
+ * @param command First positional argument.
+ * @param site Value of `--site`, if given.
+ * @param subdomain Value of `--subdomain`, if given with one.
+ * @returns The refusal to print, or undefined when the flag is fine.
+ */
+function subdomainFlagProblem(
+	argv: readonly string[],
+	command: string,
+	site: string | undefined,
+	subdomain: string | undefined,
+): string | undefined {
+	if (!argv.includes("--subdomain")) return undefined;
+
+	if (subdomain === undefined) {
+		return "`--subdomain` needs a name after it, for example `--subdomain my-docs`.";
+	}
+
+	if (site !== undefined) {
+		return (
+			"`--site` and `--subdomain` cannot both be given: `--site` publishes to a site you already " +
+			"have, and `--subdomain` creates a new one. Drop whichever is not what you meant."
+		);
+	}
+
+	if (command !== "init" && command !== "deploy") {
+		return (
+			`\`--subdomain\` only applies to \`init\` and \`deploy\`, which can create a site. Use ` +
+			`\`--site\` to tell \`${command}\` which of your sites to act on.`
+		);
+	}
+
+	return undefined;
 }
 
 /**
@@ -111,6 +162,15 @@ export async function run(argv: readonly string[]): Promise<CommandResult> {
 	if (command === undefined) return { text: HELP, json: { help: HELP }, code: 1 };
 
 	const site = flagValue(argv, "--site");
+	const subdomain = flagValue(argv, "--subdomain");
+
+	const refusal = subdomainFlagProblem(argv, command, site, subdomain);
+	if (refusal !== undefined) {
+		const failed = { text: refusal, json: { error: refusal }, code: 1 };
+
+		return json ? { ...failed, text: JSON.stringify(failed.json, null, 2) } : failed;
+	}
+
 	const result = await dispatch(
 		command,
 		rest,
@@ -118,6 +178,7 @@ export async function run(argv: readonly string[]): Promise<CommandResult> {
 		json,
 		argv.includes("--device"),
 		argv.includes("--yes"),
+		subdomain,
 	);
 
 	return json ? { ...result, text: JSON.stringify(result.json, null, 2) } : result;
@@ -134,6 +195,7 @@ export async function run(argv: readonly string[]): Promise<CommandResult> {
  * with a JSON document is not JSON.
  * @param device Whether `--device` was given, which picks between the two sign-in flows.
  * @param confirmed Whether `--yes` was given, which is the only confirmation a deletion gets.
+ * @param subdomain Value of `--subdomain`, already checked against the command and `--site`.
  * @returns The command's result.
  */
 async function dispatch(
@@ -143,6 +205,7 @@ async function dispatch(
 	json: boolean,
 	device: boolean,
 	confirmed: boolean,
+	subdomain?: string,
 ): Promise<CommandResult> {
 	switch (command) {
 		case "login": {
@@ -157,7 +220,7 @@ async function dispatch(
 		case "logout":
 			return logout();
 		case "init":
-			return await init(rest[0] ?? ".", site);
+			return await init(rest[0] ?? ".", site, subdomain);
 		case "deploy": {
 			// Progress on stderr, for the same reason `login` puts it there: a shell reading stdout gets
 			// the URL and nothing else, with or without --json. Suppressed entirely under --json, where
@@ -172,7 +235,7 @@ async function dispatch(
 
 			// Undefined rather than "." so `deployCommand` can tell "no folder given" from "this folder",
 			// which is what lets drop2run.json supply one.
-			return await deployCommand(rest[0], site, report);
+			return await deployCommand(rest[0], site, report, subdomain);
 		}
 		case "ls":
 		case "list":

@@ -16,6 +16,7 @@ drop2run login [--device]                    Sign in and store a token
 drop2run logout                              Remove the stored token
 drop2run init [dir] [--site <subdomain>]     Tie this folder to a site
 drop2run deploy [dir] [--site <subdomain>]   Publish a folder
+drop2run init|deploy --subdomain <name>      Create a new site under a name you pick
 drop2run ls                                  List your sites
 drop2run open [site]                         Open a site in a browser
 drop2run rollback <deployId> [--site X]      Put an earlier version back live
@@ -30,13 +31,25 @@ drop2run --version                           Print the version
 
 ## Which site a command acts on
 
-`--site`, then `drop2run.json`, then a new one. `init` writes that file, so this is the whole of a
-normal project:
+`--subdomain` creates one under the name you give; otherwise `--site`, then `drop2run.json`, then a new
+site with a generated name. `init` writes that file, so this is the whole of a normal project:
 
 ```bash
 drop2run init dist        # creates a site, writes drop2run.json
 drop2run deploy           # publishes dist to it, no arguments
 ```
+
+```bash
+drop2run init dist --subdomain my-docs    # same, but you choose the address
+```
+
+Lowercase letters, digits and hyphens, not starting or ending with one. A name that is taken, reserved,
+or past the number of self-picked names your plan allows is refused with the reason. It cannot be changed
+later — a site is reached by the address it was created with — so a wrong name means deleting the site,
+which is not undoable.
+
+`--site` never creates anything: it finds a site you already have, and fails when nothing matches. That
+is what keeps a subdomain typed one letter wrong from quietly becoming a second site.
 
 `deploy` never creates a second site while a `drop2run.json` sits next to it — that would leave the real
 site untouched and you looking at a URL you did not expect.

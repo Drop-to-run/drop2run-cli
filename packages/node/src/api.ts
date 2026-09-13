@@ -178,16 +178,33 @@ export async function listSites(credentials: Credentials): Promise<SiteSummary[]
 }
 
 /**
- * Creates a site with a generated subdomain.
+ * Creates a site, either with a subdomain the caller picked or with a generated one.
+ *
+ * <b>The name is optional and the parameter is the whole of the difference.</b> The server decides
+ * whether a picked name is allowed — format, the reserved list, and how many self-picked names the plan
+ * still has — and it says which of those failed in the `detail` it sends back. Checking any of it here
+ * would be a second copy of rules that live in one place, and a copy that disagrees is worse than no
+ * copy: it would refuse a name the server would have accepted, with wording nobody could act on.
  *
  * @param credentials Token and base URL.
- * @returns The new site.
+ * @param subdomain Subdomain to ask for, or undefined to let the server generate one.
+ * @returns The new site, carrying the subdomain that was actually allocated.
+ * @throws Error carrying the API's own wording when the name is refused.
  */
-export async function createSite(credentials: Credentials): Promise<SiteSummary> {
+export async function createSite(
+	credentials: Credentials,
+	subdomain?: string,
+): Promise<SiteSummary> {
 	const created = await call<{ siteId: string; subdomain: string; url: string }>(
 		credentials,
 		"sites",
-		{ method: "POST", body: JSON.stringify({}) },
+		{
+			method: "POST",
+			// An absent field rather than a null one, because the API reads null, empty and missing the
+			// same way and a body carrying only what was asked for is the one that reads correctly in a
+			// log.
+			body: JSON.stringify(subdomain === undefined ? {} : { subdomain }),
+		},
 	);
 
 	return { ...created, name: null };

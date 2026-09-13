@@ -71,6 +71,12 @@ lose it.
 Both publish tools take an optional `site` — a subdomain or site id to publish over. Leave it out and a
 new site is created.
 
+Both also take an optional `subdomain`, which names the new site instead of letting the server generate
+one. It is for a person who asked for a particular address: the name becomes the URL, cannot be changed
+afterwards, and a site made under a guessed one has to be deleted by hand. `site` and `subdomain` are
+opposites — one publishes over a site that exists, the other creates one that does not — so passing both
+is refused rather than resolved.
+
 Both sign-in tools answer "not approved yet" rather than failing while they wait, and calling them
 again keeps waiting on the same sign-in. Neither replaces a token that is already stored unless asked
 to with `replace`.
@@ -78,7 +84,9 @@ to with `replace`.
 ## Behaviour worth knowing
 
 **Publishing without a `site` creates a new one.** It never replaces your most recent site by default:
-"put this online" is not "and overwrite what I published last time".
+"put this online" is not "and overwrite what I published last time". Say what address you want and pass
+it as `subdomain`; say nothing and the name is generated, which is the right default for something
+nobody is going to link to.
 
 **A site can be documents instead of a built site.** A publish needs an `index.html` at the top level,
 or at least one `.md`, `.markdown` or `.pdf` file — those are served through the reader. So a single

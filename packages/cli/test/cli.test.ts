@@ -350,3 +350,102 @@ describe("--site", () => {
 		expect(seen.some((request) => request.startsWith("POST"))).toBe(true);
 	});
 });
+
+describe("--subdomain", () => {
+	/**
+	 * The working directory, redirected for this group.
+	 *
+	 * <b>`init` writes a file into the folder it is run in.</b> Left alone, the first test here wrote a
+	 * `drop2run.json` into `packages/cli` — untracked, easy to commit by accident, and picked up by every
+	 * later test in the run, which is how the last one failed with "this folder already has a
+	 * drop2run.json" instead of the API's refusal. A command that writes needs somewhere disposable to
+	 * write to, the same way the rest of this file needed a HOME of its own.
+	 */
+	let realCwd: string;
+
+	beforeEach(() => {
+		realCwd = process.cwd();
+		process.chdir(mkdtempSync(join(tmpdir(), "drop2run-cli-project-")));
+	});
+
+	afterEach(() => {
+		process.chdir(realCwd);
+	});
+
+	it("asks the API for the name that was typed, rather than letting it generate one", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const bodies: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL, init?: RequestInit) => {
+				if (String(input).endsWith("/sites") && init?.method === "POST") {
+					bodies.push(String(init.body));
+				}
+
+				return Response.json({
+					siteId: "01JNEW",
+					subdomain: "my-docs",
+					url: "https://my-docs.dropto.live",
+				});
+			}),
+		);
+
+		await run(["init", "dist", "--subdomain", "my-docs"]);
+
+		expect(bodies).toEqual(['{"subdomain":"my-docs"}']);
+	});
+
+	it("refuses a flag with nothing after it, which would otherwise generate a name in silence", async () => {
+		// The failure this rules out is the quiet one. `--subdomain` with no value parses as undefined,
+		// which is indistinguishable from never having passed it — so somebody who typed the flag
+		// precisely to avoid a generated name would get one anyway, plus a site to delete afterwards.
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const fetched = vi.fn(async () => Response.json({}));
+		vi.stubGlobal("fetch", fetched);
+
+		const result = await run(["deploy", "dist", "--subdomain"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("--subdomain");
+		expect(fetched).not.toHaveBeenCalled();
+	});
+
+	it("refuses to be given with --site, since one wants a site to exist and the other wants it not to", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const fetched = vi.fn(async () => Response.json({}));
+		vi.stubGlobal("fetch", fetched);
+
+		const result = await run(["deploy", "--site", "calm-cedar", "--subdomain", "my-docs"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("--site");
+		expect(fetched).not.toHaveBeenCalled();
+	});
+
+	it("refuses on a command that cannot create a site, rather than ignoring it", async () => {
+		// `rm --subdomain x` reads as naming a site. Ignoring the flag would delete whatever the project
+		// file points at instead, report success, and leave the name that was typed untouched.
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const fetched = vi.fn(async () => Response.json({}));
+		vi.stubGlobal("fetch", fetched);
+
+		const result = await run(["rm", "--subdomain", "my-docs", "--yes"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("init");
+		expect(fetched).not.toHaveBeenCalled();
+	});
+
+	it("carries the API's own refusal, since only the server knows which rule a name broke", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ detail: "That name is already taken" }, { status: 400 })),
+		);
+
+		const result = await run(["init", "dist", "--subdomain", "taken-name"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("already taken");
+	});
+});

@@ -38,12 +38,33 @@ export interface PublishResult {
  * not match, it fails rather than falling back to creating one, because "I could not find that site so
  * I made a different one" is not a thing anybody asked for.
  *
+ * <b>`subdomain` is the opposite request and cannot be combined with `site`.</b> One names a site that
+ * must already exist; the other names one that must not. Taken together they have no meaning, and
+ * picking either would be a guess about which the caller meant.
+ *
  * @param credentials Token and base URL.
  * @param site Subdomain or site id the caller named, or undefined.
+ * @param subdomain Subdomain to create a new site under, or undefined.
  * @returns The site to publish to.
- * @throws Error when a named site does not exist.
+ * @throws Error when a named site does not exist, when both arguments are given, or when the server
+ * refuses the requested name.
  */
-async function resolveSite(credentials: Credentials, site?: string): Promise<SiteSummary> {
+async function resolveSite(
+	credentials: Credentials,
+	site?: string,
+	subdomain?: string,
+): Promise<SiteSummary> {
+	if (subdomain !== undefined) {
+		if (site !== undefined) {
+			throw new Error(
+				"Give either an existing site or a subdomain for a new one, not both: publishing over a " +
+					"site and creating one are different requests.",
+			);
+		}
+
+		return await createSite(credentials, subdomain);
+	}
+
 	if (site === undefined) return await createSite(credentials);
 
 	const wanted = site.trim().toLowerCase();
@@ -73,6 +94,8 @@ async function resolveSite(credentials: Credentials, site?: string): Promise<Sit
  * @param site Subdomain or site id to publish to, or undefined for a new site.
  * @param onProgress Receives every stage the engine reports, for a caller that has somewhere to draw
  * them. A tool returning one message does not pass this; a terminal that can rewrite a line does.
+ * @param subdomain Subdomain to create a new site under, or undefined to let the server name it. Last
+ * rather than beside `site` so that every existing caller keeps compiling and keeps meaning what it did.
  * @returns What to tell the caller.
  * @throws Error when the deploy fails, carrying the engine's message.
  */
@@ -81,8 +104,9 @@ export async function publish(
 	source: DeploySource,
 	site?: string,
 	onProgress?: ProgressListener,
+	subdomain?: string,
 ): Promise<PublishResult> {
-	const target = await resolveSite(credentials, site);
+	const target = await resolveSite(credentials, site, subdomain);
 
 	let files = 0;
 	let url = target.url;
@@ -140,6 +164,7 @@ export async function publish(
  * @param directory Absolute path of the folder to publish.
  * @param site Subdomain or site id, or undefined for a new site.
  * @param onProgress Receives every stage the engine reports. See {@link publish}.
+ * @param subdomain Subdomain to create a new site under. See {@link publish}.
  * @returns What to tell the caller.
  */
 export function publishDirectory(
@@ -147,8 +172,9 @@ export function publishDirectory(
 	directory: string,
 	site?: string,
 	onProgress?: ProgressListener,
+	subdomain?: string,
 ): Promise<PublishResult> {
-	return publish(credentials, directorySource(directory), site, onProgress);
+	return publish(credentials, directorySource(directory), site, onProgress, subdomain);
 }
 
 /** One file a caller wrote, rather than one read off a disk. */
@@ -207,6 +233,7 @@ function cleanPath(path: string): string {
  * @param credentials Token and base URL.
  * @param files What to publish, each with a path relative to the site root.
  * @param site Subdomain or site id, or undefined for a new site.
+ * @param subdomain Subdomain to create a new site under. See {@link publish}.
  * @returns What to tell the caller.
  * @throws Error when a path names nothing usable, or two files claim the same one.
  */
@@ -214,6 +241,7 @@ export async function publishFiles(
 	credentials: Credentials,
 	files: readonly AuthoredFile[],
 	site?: string,
+	subdomain?: string,
 ): Promise<PublishResult> {
 	const encoder = new TextEncoder();
 	const collected = files.map((file) => ({
@@ -229,5 +257,5 @@ export async function publishFiles(
 		seen.add(file.path);
 	}
 
-	return publish(credentials, async () => collected, site);
+	return publish(credentials, async () => collected, site, undefined, subdomain);
 }

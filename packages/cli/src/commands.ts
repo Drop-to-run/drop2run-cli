@@ -330,7 +330,8 @@ export async function list(): Promise<CommandResult> {
 /**
  * Publishes a folder.
  *
- * <b>Three sources for "which site", in one order.</b> `--site` wins because it was typed for this run;
+ * <b>Four sources for "which site", in one order.</b> `--subdomain` wins, then `--site` because it was
+ * typed for this run;
  * then `drop2run.json`, because somebody ran `init` in this folder and meant it; and only with neither
  * does a new site get created. The order matters more than it looks: a publish that silently created a
  * site when a project file existed would leave the real one untouched and the person looking at a URL
@@ -343,25 +344,42 @@ export async function list(): Promise<CommandResult> {
  * enough for silence to read as a hang, and the engine has always reported its stages — the CLI simply
  * dropped them. They go to stderr, so a shell reading stdout still gets the URL and nothing else.
  *
+ * <b>`--subdomain` is a fourth source, and it outranks the other three</b> because it cannot mean
+ * anything else: naming a subdomain for a site that does not exist yet is a request to create one under
+ * that name, and there is no reading of it that refers to the project file. It is refused alongside
+ * `--site` before this is called — see `run` — so the two cannot both be set here.
+ *
  * @param directory Folder to publish, or undefined to use the project file and then the working directory.
  * @param site Subdomain or site id to publish over, or undefined to use the project file.
  * @param report Receives progress, injectable so a test does not print and `--json` can suppress it.
+ * @param subdomain Subdomain to create a new site under, or undefined to publish to an existing one.
  * @returns The result.
  */
 export async function deployCommand(
 	directory: string | undefined,
 	site?: string,
 	report: ProgressWriter = silentProgress,
+	subdomain?: string,
 ): Promise<CommandResult> {
 	const found = credentialsOr();
 	if ("result" in found) return found.result;
 
 	const project = readProject();
-	const target = site ?? project?.siteId;
 	const folder = directory ?? project?.dir ?? ".";
 
+	// Only when no name was typed for a new site. Passing both the project file's site and a subdomain
+	// would ask to publish over a site and to create one in the same call, which is refused below rather
+	// than resolved by preferring one — see `resolveSite`.
+	const target = subdomain === undefined ? (site ?? project?.siteId) : undefined;
+
 	try {
-		const result = await publishDirectory(found.credentials, resolve(folder), target, report);
+		const result = await publishDirectory(
+			found.credentials,
+			resolve(folder),
+			target,
+			report,
+			subdomain,
+		);
 		const what = result.unchanged
 			? "Already up to date — nothing needed publishing."
 			: `Published ${result.files.toLocaleString()} ${result.files === 1 ? "file" : "files"}.`;
@@ -391,11 +409,22 @@ export async function deployCommand(
  * <b>It refuses to overwrite.</b> A second `init` in a folder that already has one would silently
  * repoint it, and the version in git would then disagree with the version on the machine that ran it.
  *
+ * <b>`--subdomain` names the site it creates.</b> Without it the server generates a name, which is the
+ * right default for a folder nobody has decided about yet and the wrong one for a project that will be
+ * linked to from somewhere. It is a separate flag from `--site` rather than a fallback inside it,
+ * because `--site` that matches nothing must keep failing: a typo turned into a new site under the
+ * typo's name is a mistake nobody notices until the old URL is asked for.
+ *
  * @param directory Folder to publish, relative to the working directory.
  * @param site Subdomain or site id of an existing site, or undefined to create one.
+ * @param subdomain Subdomain to create the new site under, or undefined for a generated one.
  * @returns The result.
  */
-export async function init(directory: string, site?: string): Promise<CommandResult> {
+export async function init(
+	directory: string,
+	site?: string,
+	subdomain?: string,
+): Promise<CommandResult> {
 	const found = credentialsOr();
 	if ("result" in found) return found.result;
 
@@ -408,7 +437,7 @@ export async function init(directory: string, site?: string): Promise<CommandRes
 	try {
 		const target =
 			site === undefined
-				? await createSite(found.credentials)
+				? await createSite(found.credentials, subdomain)
 				: await findSite(found.credentials, site);
 
 		const project: Project = {

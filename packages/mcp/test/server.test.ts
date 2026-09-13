@@ -106,6 +106,36 @@ describe("the tool surface", () => {
 		expect(publishDir?.inputSchema.required).toEqual(["path"]);
 	});
 
+	it("lets either publish name a subdomain, and requires neither to", async () => {
+		// Optional on both, and optional is the point twice over. Required, it would make a model invent
+		// an address for every note it publishes; missing, somebody who asked for a particular URL would
+		// be told the tool cannot do that while the API has taken the name since the first release.
+		const { tools } = await (await connect()).listTools();
+
+		for (const name of ["publish_files", "publish_dir"]) {
+			const tool = tools.find((candidate) => candidate.name === name);
+
+			expect(tool?.inputSchema.properties?.subdomain).toBeDefined();
+			expect(tool?.inputSchema.required ?? []).not.toContain("subdomain");
+		}
+	});
+
+	it("tells a model not to pass a site and a subdomain together", async () => {
+		// The two contradict each other — one publishes over a site that exists, the other creates one
+		// that does not — and the engine refuses the pair. A description that left this out would have a
+		// model discover it as a failed publish instead of not writing the call.
+		const { tools } = await (await connect()).listTools();
+
+		for (const name of ["publish_files", "publish_dir"]) {
+			const tool = tools.find((candidate) => candidate.name === name);
+			const subdomain = tool?.inputSchema.properties?.subdomain as
+				| { description?: string }
+				| undefined;
+
+			expect(subdomain?.description).toContain("`site`");
+		}
+	});
+
 	it("asks for nothing to list sites", async () => {
 		const { tools } = await (await connect()).listTools();
 		const listSites = tools.find((tool) => tool.name === "list_sites");
