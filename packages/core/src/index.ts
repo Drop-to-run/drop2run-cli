@@ -13,6 +13,17 @@ export {
 	type PrepareResponse,
 	prepareDeploy,
 } from "./api.js";
+export {
+	DOCUMENT_EXTENSIONS,
+	EDITABLE_EXTENSIONS,
+	extensionOf,
+	FILE_TYPES,
+	type FileKind,
+	type FileType,
+	MEDIA_TYPES,
+	READER_EXTENSIONS,
+	VIEWABLE_EXTENSIONS,
+} from "./fileTypes.js";
 export { hashAll, sha256Hex } from "./hash.js";
 export { shouldIgnore } from "./ignore.js";
 export {

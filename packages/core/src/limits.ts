@@ -1,3 +1,7 @@
+import {
+	DOCUMENT_EXTENSIONS as TABLE_DOCUMENT_EXTENSIONS,
+	VIEWABLE_EXTENSIONS as TABLE_VIEWABLE_EXTENSIONS,
+} from "./fileTypes.js";
 import { ClientErrorCode, DeployError, type ManifestFile } from "./types.js";
 
 /**
@@ -45,8 +49,11 @@ const REQUIRED_INDEX = "index.html";
  * so a drop that will be refused is refused before it is hashed and uploaded. Narrower here than there and
  * a drop is rejected in the browser that the server would have taken; wider and the user watches an upload
  * run to completion before being told no.
+ *
+ * Read from {@link FILE_TYPES} rather than written out. The list used to be here, next to a second one
+ * whose relationship to it was described in prose; both are now columns of one table.
  */
-const DOCUMENT_EXTENSIONS = [".md", ".markdown", ".pdf"];
+const DOCUMENT_EXTENSIONS = TABLE_DOCUMENT_EXTENSIONS;
 
 /**
  * Whether a path is a document the viewer can open on its own.
@@ -72,7 +79,7 @@ export function isDocumentPath(path: string): boolean {
  * `apps/viewer/src/paths.ts` minus its `binary` fallback. Three lists, one fact, and no compiler
  * between them: widen the viewer without widening these and a file the product can display is refused
  * before it is uploaded; widen these without the viewer and a published file is handed back as a
- * download.
+ * download. Both of the other two are now checked against {@link FILE_TYPES} by a test of their own.
  *
  * Only ever asked of a single-file drop, and that bound is the point rather than an omission. Nearly
  * every web project folder holds a `.json` or a `.css`, so counting these at any size would take a
@@ -84,40 +91,7 @@ export function isDocumentPath(path: string): boolean {
  * `index.html` it plainly is, so the normal path never reaches this entry; a caller that skips the
  * rename should still get a readable one-file site rather than a rejection.
  */
-const VIEWABLE_EXTENSIONS = [
-	// Documents — these also count at any depth, via DOCUMENT_EXTENSIONS.
-	".md",
-	".markdown",
-	".pdf",
-	// Prose the reader shows preformatted.
-	".txt",
-	".log",
-	".csv",
-	// Source the reader shows with highlighting.
-	".json",
-	".yaml",
-	".yml",
-	".toml",
-	".css",
-	".js",
-	".ts",
-	".tsx",
-	".jsx",
-	".sh",
-	".xml",
-	// Pictures the reader shows with an img element.
-	".png",
-	".jpg",
-	".jpeg",
-	".gif",
-	".webp",
-	".avif",
-	".svg",
-	".ico",
-	// See the note above: a floor for a caller that did not rename it.
-	".html",
-	".htm",
-];
+const VIEWABLE_EXTENSIONS = TABLE_VIEWABLE_EXTENSIONS;
 
 /**
  * Whether a path is a file the viewer can render.
