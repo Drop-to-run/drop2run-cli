@@ -19,7 +19,7 @@
  * TypeScript-to-C# generator would be new machinery: a script, a generated file to commit, another
  * `git diff --exit-code` in CI, and a step every contributor has to remember. What it buys over a test
  * is "cannot drift while you are typing" rather than "cannot merge while drifted", for a flat list of
- * strings. See `docs/briefs/FILE-TYPES-BRIEF.md` F10.
+ * strings. See `docs/IMPLEMENTATION-PLAN.md` §15c.1 F10.
  */
 
 /**
@@ -95,6 +95,12 @@ export interface FileType {
  *
  * Rows are grouped by what they are for, and ordered inside a group the way somebody would list them.
  * Nothing reads the order.
+ *
+ * ⚠️ <b>The layout of a row is load-bearing for the C# test, which parses this file as text.</b> Each
+ * row writes one field per line, and that parser splits on braces rather than on lines, so a formatter
+ * reflowing a row cannot change what it reads. All three tests count the rows before reading anything:
+ * a parser that matches nothing reports success exactly like two lists that agree, which is the one
+ * failure this whole mechanism cannot afford.
  */
 export const FILE_TYPES: readonly FileType[] = [
 	// Documents. The three extensions that make a folder a documents site.
