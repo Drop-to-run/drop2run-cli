@@ -241,25 +241,70 @@ export function checkLimits(files: readonly ManifestFile[], limits: PlanLimits |
 		);
 	}
 
-	if (!limits) return;
+	const refusal = sizeRefusal(
+		files.map((file) => ({ path: file.path, size: file.bytes.length })),
+		limits,
+	);
+
+	if (refusal) throw refusal;
+}
+
+/**
+ * A file whose size is known, whether or not its bytes have been read.
+ *
+ * What a `File` handle already carries, which is what makes {@link sizeRefusal} askable on the
+ * confirmation screen — before anything is hashed, and before a site exists to publish to.
+ */
+export interface SizedFile {
+	/** Path relative to the drop root. */
+	readonly path: string;
+	/** Size in bytes. */
+	readonly size: number;
+}
+
+/**
+ * The half of {@link checkLimits} that is arithmetic: how many files, how big each one is, how big the
+ * drop is in total.
+ *
+ * Returns the refusal rather than throwing it, because it is asked from two places that want two
+ * different things with the same answer. {@link checkLimits} throws it, as the pipeline has always
+ * done. The confirmation screen renders it beside the drop's listing and disables Publish — and that
+ * screen is the one that matters here: a site is reserved the moment somebody confirms, so a drop
+ * refused only after `hashAll` had already cost them a subdomain and a slot for a folder that was
+ * never going to publish.
+ *
+ * Split out rather than copied for the reason this file keeps repeating: two implementations of one
+ * rule answer differently the first time either is edited. This is the implementation; `checkLimits`
+ * is a caller of it.
+ *
+ * @param files Every file in the drop, with its size.
+ * @param limits Limits of the caller's plan, or null when they could not be loaded — which skips
+ *   every check here, since the server enforces the numbers regardless.
+ * @returns The refusal, or null when the drop is within the plan.
+ */
+export function sizeRefusal(
+	files: readonly SizedFile[],
+	limits: PlanLimits | null,
+): DeployError | null {
+	if (!limits) return null;
 
 	if (files.length > limits.maxFiles) {
-		throw new DeployError(
+		return new DeployError(
 			ClientErrorCode.TooManyFiles,
 			`That is ${files.length} files, and this plan allows ${limits.maxFiles}.`,
 			{ limit: limits.maxFiles, actual: files.length },
 		);
 	}
 
-	const oversized = files.find((file) => file.bytes.length > limits.maxFileBytes);
+	const oversized = files.find((file) => file.size > limits.maxFileBytes);
 	if (oversized) {
-		throw new DeployError(
+		return new DeployError(
 			ClientErrorCode.FileTooLarge,
-			`${oversized.path} is ${formatBytes(oversized.bytes.length)}, and this plan allows ${formatBytes(limits.maxFileBytes)} per file.`,
+			`${oversized.path} is ${formatBytes(oversized.size)}, and this plan allows ${formatBytes(limits.maxFileBytes)} per file.`,
 			{
 				path: oversized.path,
 				limit: limits.maxFileBytes,
-				actual: oversized.bytes.length,
+				actual: oversized.size,
 			},
 		);
 	}
@@ -267,14 +312,16 @@ export function checkLimits(files: readonly ManifestFile[], limits: PlanLimits |
 	// Null is not "no check" by accident: a tier with no per-publish ceiling is bounded by what the
 	// account already holds, and the browser has no way to know that figure. The server does, and it is
 	// where the refusal has to come from anyway — so this check steps aside rather than guessing.
-	const total = totalBytes(files);
+	const total = files.reduce((sum, file) => sum + file.size, 0);
 	if (limits.maxSiteBytes !== null && total > limits.maxSiteBytes) {
-		throw new DeployError(
+		return new DeployError(
 			ClientErrorCode.TooLarge,
 			`That drop is ${formatBytes(total)}, and this plan allows ${formatBytes(limits.maxSiteBytes)}.`,
 			{ limit: limits.maxSiteBytes, actual: total },
 		);
 	}
+
+	return null;
 }
 
 /**

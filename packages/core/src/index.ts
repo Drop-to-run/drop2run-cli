@@ -39,6 +39,8 @@ export {
 	type PlanLimits,
 	renameOfLoneHtmlPage,
 	shouldWarnAboutSize,
+	type SizedFile,
+	sizeRefusal,
 	totalBytes,
 } from "./limits.js";
 export { type DeployOptions, type DeploySource, deploy } from "./pipeline.js";
