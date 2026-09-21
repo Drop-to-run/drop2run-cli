@@ -452,6 +452,40 @@ export const READER_EXTENSIONS: readonly string[] = extensionsWhere((type) => ty
 export const EDITABLE_EXTENSIONS: readonly string[] = extensionsWhere((type) => type.editable);
 
 /**
+ * Extensions whose presence means the drop is the inside of a website rather than a set of pictures.
+ *
+ * <b>The guard on {@link GALLERY_EXTENSIONS}, and the reason a folder of images can be published at
+ * all.</b> Without it, a `dist/assets/` dragged in place of `dist/` — no `index.html`, because the
+ * person picked the folder below the one they meant — would publish as a gallery of sprites and
+ * favicons instead of being refused with the name of the folder to drop. With it, the same drop still
+ * gets that refusal, because a build output has scripts and stylesheets in it and a camera roll does
+ * not.
+ *
+ * Deliberately not "everything that is not an image". A folder of generated pictures beside a `.json`
+ * of prompts is still a folder of pictures; it is scripts, stylesheets and pages that say somebody
+ * dropped a website.
+ */
+export const WEB_ASSET_EXTENSIONS: readonly string[] = [
+	".html",
+	".htm",
+	".js",
+	".mjs",
+	".cjs",
+	".css",
+];
+
+/**
+ * Extensions that count towards a drop being a folder of pictures.
+ *
+ * Derived from the kind rather than listed again, so a picture format added to the table is a picture
+ * here too. Only meaningful together with {@link WEB_ASSET_EXTENSIONS}: the rule is "some of these and
+ * none of those", and either half alone is the wrong rule.
+ */
+export const GALLERY_EXTENSIONS: readonly string[] = extensionsWhere(
+	(type) => type.kind === "image",
+);
+
+/**
  * Media type for each extension that has one.
  *
  * ⚠️ Mirrored by `TYPES` in `apps/router/src/headers.ts`. Extensions whose {@link FileType.mime} is

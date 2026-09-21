@@ -1,3 +1,4 @@
+import { extensionOf, GALLERY_EXTENSIONS } from "./fileTypes.js";
 import { canPublish, isDocumentPath, renameOfLoneHtmlPage } from "./limits.js";
 import type { DroppedFile } from "./types.js";
 
@@ -52,6 +53,16 @@ export interface FolderSummary {
 	 * instead of only that it is allowed.
 	 */
 	readonly documents: number;
+	/**
+	 * How many pictures there are, at any depth.
+	 *
+	 * Counted for the same reason as {@link documents} and used for the same kind of sentence: a drop
+	 * with no `index.html` and no markdown can still be publishable, as a folder of pictures, and the
+	 * screen should say which of the two it is rather than only that it is allowed. Whether the drop
+	 * really is a gallery is `publishable`'s business — a picture beside a script is a build output,
+	 * and this count alone cannot tell the difference.
+	 */
+	readonly pictures: number;
 	/**
 	 * Whether this drop can be published at all.
 	 *
@@ -117,6 +128,7 @@ export function summarise(payload: readonly DroppedFile[] | File): DropSummary {
 	let bytes = 0;
 	let hasIndexHtml = false;
 	let documents = 0;
+	let pictures = 0;
 
 	for (const entry of dropped) {
 		bytes += entry.file.size;
@@ -124,6 +136,7 @@ export function summarise(payload: readonly DroppedFile[] | File): DropSummary {
 		// At any depth, matching how `checkLimits` looks for one — a documents site is a folder of
 		// markdown, and requiring the markdown to be at the root would refuse most of them.
 		if (isDocumentPath(entry.path)) documents += 1;
+		if (GALLERY_EXTENSIONS.includes(extensionOf(entry.path))) pictures += 1;
 
 		const slash = entry.path.indexOf("/");
 
@@ -180,6 +193,7 @@ export function summarise(payload: readonly DroppedFile[] | File): DropSummary {
 		folders: folders.size,
 		hasIndexHtml,
 		documents,
+		pictures,
 		publishable,
 		renamedToIndex,
 		looksLikeProject,

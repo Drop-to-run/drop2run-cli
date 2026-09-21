@@ -1,6 +1,9 @@
 import {
 	DOCUMENT_EXTENSIONS as TABLE_DOCUMENT_EXTENSIONS,
+	extensionOf,
+	GALLERY_EXTENSIONS,
 	VIEWABLE_EXTENSIONS as TABLE_VIEWABLE_EXTENSIONS,
+	WEB_ASSET_EXTENSIONS,
 } from "./fileTypes.js";
 import { ClientErrorCode, DeployError, type ManifestFile } from "./types.js";
 
@@ -109,10 +112,40 @@ export function isViewablePath(path: string): boolean {
 }
 
 /**
+ * Whether a set of paths is a folder of pictures, and so is something to look at rather than run.
+ *
+ * <b>Two halves, and neither works alone.</b> At least one picture, and not one script, stylesheet or
+ * page anywhere in the drop. Somebody who has just generated thirty images has the first and not the
+ * second; somebody who dragged `dist/assets/` instead of `dist/` has both, and gets the refusal that
+ * names the folder to drop rather than a site nobody asked for.
+ *
+ * ⚠️ This is the first rule about a drop that cannot be asked of one path. {@link isDocumentPath}
+ * answers "is this file a document"; this one has no per-file answer, because a `.png` means a gallery
+ * in one drop and a sprite in another. Mirrored by `SiteModeDetection.IsImageFolder` in `apps/api`,
+ * which has the same shape for the same reason.
+ *
+ * @param paths Normalized manifest paths.
+ * @returns True when the drop is a folder of pictures.
+ */
+export function isImageFolder(paths: readonly string[]): boolean {
+	let pictures = false;
+
+	for (const path of paths) {
+		const ext = extensionOf(path);
+
+		if (WEB_ASSET_EXTENSIONS.includes(ext)) return false;
+		if (GALLERY_EXTENSIONS.includes(ext)) pictures = true;
+	}
+
+	return pictures;
+}
+
+/**
  * Whether a set of paths leaves something at the root of a site, and so can be published at all.
  *
- * Three rules, the same three `SiteModeDetection.CanServe` applies on the server and in the same order:
- * an `index.html` at the root, or one document at any depth, or a single file the viewer can render.
+ * Four rules, the same four `SiteModeDetection.CanServe` applies on the server and in the same order:
+ * an `index.html` at the root, or one document at any depth, or a folder of pictures, or a single file
+ * the viewer can render.
  *
  * Exported so the confirmation screen and {@link checkLimits} cannot answer it differently — the screen
  * used to compute its own version and told people a folder of markdown had no index page.
@@ -123,6 +156,7 @@ export function isViewablePath(path: string): boolean {
 export function canPublish(paths: readonly string[]): boolean {
 	if (paths.some((path) => path === REQUIRED_INDEX)) return true;
 	if (paths.some(isDocumentPath)) return true;
+	if (isImageFolder(paths)) return true;
 
 	return paths.length === 1 && paths[0] !== undefined && isViewablePath(paths[0]);
 }

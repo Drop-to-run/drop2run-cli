@@ -20,9 +20,11 @@ export {
 	FILE_TYPES,
 	type FileKind,
 	type FileType,
+	GALLERY_EXTENSIONS,
 	MEDIA_TYPES,
 	READER_EXTENSIONS,
 	VIEWABLE_EXTENSIONS,
+	WEB_ASSET_EXTENSIONS,
 } from "./fileTypes.js";
 export { hashAll, sha256Hex } from "./hash.js";
 export { shouldIgnore } from "./ignore.js";
@@ -31,6 +33,7 @@ export {
 	checkLimits,
 	formatBytes,
 	isDocumentPath,
+	isImageFolder,
 	isViewablePath,
 	MOBILE_WARNING_BYTES,
 	type PlanLimits,
