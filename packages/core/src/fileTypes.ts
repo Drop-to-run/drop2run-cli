@@ -29,7 +29,17 @@
  * download rather than rendering it, which is also what makes {@link VIEWABLE_EXTENSIONS} derivable
  * rather than a column of its own.
  */
-export type FileKind = "markdown" | "pdf" | "image" | "code" | "text" | "html" | "binary";
+export type FileKind =
+	| "markdown"
+	| "pdf"
+	| "image"
+	| "code"
+	| "text"
+	| "html"
+	| "docx"
+	| "xlsx"
+	| "epub"
+	| "binary";
 
 /** One extension, and every decision that hangs off it. */
 export interface FileType {
@@ -108,6 +118,34 @@ export const FILE_TYPES: readonly FileType[] = [
 		ext: ".pdf",
 		mime: "application/pdf",
 		kind: "pdf",
+		document: true,
+		reader: true,
+		editable: false,
+	},
+
+	// Office documents and ebooks. Each has its own kind because each needs its own renderer, loaded
+	// only when one is opened — `.docx` through mammoth, `.xlsx` through read-excel-file, `.epub`
+	// through foliate-js.
+	{
+		ext: ".docx",
+		mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		kind: "docx",
+		document: true,
+		reader: true,
+		editable: false,
+	},
+	{
+		ext: ".xlsx",
+		mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		kind: "xlsx",
+		document: true,
+		reader: true,
+		editable: false,
+	},
+	{
+		ext: ".epub",
+		mime: "application/epub+zip",
+		kind: "epub",
 		document: true,
 		reader: true,
 		editable: false,
