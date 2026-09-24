@@ -1,7 +1,8 @@
 # @drop2run/mcp
 
-An MCP server that lets Claude — or any MCP client — publish a static site to
-[Drop2Run](https://dropto.run). Give it a folder or an HTML document; it returns a live HTTPS URL.
+An MCP server that lets Claude — or any MCP client — publish what it made to
+[Drop2Run](https://dropto.run): an HTML page, a markdown note, a folder of documents or a built site. It
+returns a live HTTPS URL.
 
 Full documentation at [dropto.run/docs/mcp](https://dropto.run/docs/mcp).
 
@@ -89,8 +90,9 @@ it as `subdomain`; say nothing and the name is generated, which is the right def
 nobody is going to link to.
 
 **A site can be documents instead of a built site.** A publish needs an `index.html` at the top level,
-or at least one `.md`, `.markdown` or `.pdf` file — those are served through the reader. So a single
-note is a whole site, and Claude does not have to wrap it in HTML to publish it.
+or at least one document — `.md`, `.markdown`, `.pdf`, `.docx`, `.xlsx` or `.epub` — and those are
+served through the reader. So a single note is a whole site, and Claude does not have to wrap it in HTML
+to publish it.
 
 **`publish_files` is text.** A PDF or an image has to come off a disk with `publish_dir`, because these
 files arrive as JSON strings.

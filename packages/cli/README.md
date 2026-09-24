@@ -1,6 +1,7 @@
 # drop2run
 
-Publish a static site to [Drop2Run](https://dropto.run) from the command line.
+Publish a page, a folder of documents or a built site to [Drop2Run](https://dropto.run) from the
+command line — by hand, from CI, or from a coding agent.
 
 ```bash
 npm i -g drop2run

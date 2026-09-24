@@ -1,7 +1,7 @@
 {
 	"name": "drop2run",
 	"version": "0.4.1",
-	"description": "Publish a static site to Drop2Run from the command line.",
+	"description": "Publish a page, a folder of documents or a built site to Drop2Run from the command line.",
 	"license": "MIT",
 	"type": "module",
 	"bin": {
@@ -27,6 +27,8 @@
 	},
 	"keywords": [
 		"static-site",
+		"markdown",
+		"pdf",
 		"deploy",
 		"hosting",
 		"cli",

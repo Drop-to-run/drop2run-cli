@@ -2,7 +2,7 @@
 	"$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
 	"name": "run.dropto/drop2run",
 	"title": "Drop2Run",
-	"description": "Publishes a folder, an HTML page, or a markdown note as a static site and returns a live HTTPS URL.",
+	"description": "Publishes what an AI made — a page, a markdown or PDF doc, or a whole site — to a live HTTPS link.",
 	"version": "0.5.1",
 	"websiteUrl": "https://dropto.run",
 	"repository": {

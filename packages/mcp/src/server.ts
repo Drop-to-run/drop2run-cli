@@ -244,7 +244,7 @@ export function createServer(): McpServer {
 		{ name: "drop2run", version: SERVER_VERSION },
 		{
 			instructions: [
-				"Publishes static sites to Drop2Run.",
+				"Publishes pages, documents and static sites to Drop2Run, and returns a URL.",
 				"",
 				"Use publish_files for anything you wrote here — a page, a markdown note, several files",
 				"together — and publish_dir for a folder that already exists on disk. Leave `site` unset to",
@@ -257,9 +257,10 @@ export function createServer(): McpServer {
 				"be deleted by hand. `site` and `subdomain` are opposites: one publishes over a site that",
 				"exists, the other creates one that does not. Never pass both.",
 				"",
-				"A site needs an index.html at its top level, or at least one .md, .markdown or .pdf file,",
-				"which publishes as a documents site and is read through a viewer. So one page goes at",
-				"index.html, and a single note is a whole publish that needs no wrapping in HTML.",
+				"A site needs an index.html at its top level, or at least one document (.md, .markdown,",
+				".pdf, .docx, .xlsx or .epub), which publishes as a documents site and is read through a",
+				"viewer. So one page goes at index.html, and a single note is a whole publish that needs",
+				"no wrapping in HTML.",
 				"",
 				"Publishing needs an access token. If there is none, call login — it opens a browser and",
 				"stores one, and no command line or manual token is involved. Where no browser can be",
@@ -381,8 +382,8 @@ export function createServer(): McpServer {
 		{
 			title: "Publish a folder",
 			description:
-				"Publishes a folder of static files and returns its URL. The folder needs an index.html at " +
-				"its root, or .md and .pdf files, which are served through the reader.",
+				"Publishes a folder from disk and returns its URL. The folder needs an index.html at its " +
+				"root, or documents (.md, .pdf, .docx, .xlsx, .epub), which are served through the reader.",
 			inputSchema: {
 				path: z.string().min(1).describe("Absolute path of the folder to publish."),
 				site: z
