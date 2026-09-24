@@ -1,6 +1,6 @@
 {
 	"name": "@drop2run/mcp",
-	"version": "0.5.1",
+	"version": "0.6.0",
 	"description": "MCP server that publishes what an AI made — a page, a document or a whole site — to Drop2Run and returns a live URL.",
 	"mcpName": "run.dropto/drop2run",
 	"license": "MIT",
