@@ -2,7 +2,7 @@
 	"manifest_version": "0.3",
 	"name": "drop2run",
 	"display_name": "Drop2Run",
-	"version": "0.6.0",
+	"version": "0.7.0",
 	"description": "Publishes what an AI made — a page, a markdown or PDF doc, or a whole site — to a live HTTPS link.",
 	"long_description": "Give Claude a page it just wrote, a report, a folder of notes or a built site, and get back a URL anyone can open.\n\nA site needs an `index.html` at its top level. Without one, markdown, PDF, Word (`.docx`), Excel (`.xlsx`) and EPUB files publish as a documents site, read through a viewer with a file tree, code highlighting, Mermaid diagrams and KaTeX maths — so a note is a whole publish that needs no wrapping in HTML.\n\nSigning in happens in a browser window; no token is pasted by hand and no command line is involved.",
 	"author": {

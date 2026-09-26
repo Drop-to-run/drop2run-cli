@@ -33,7 +33,7 @@ import { MAX_WAIT_SECONDS, signInWithBrowser, signInWithCode } from "./auth.js";
  * release that bumps only the manifest fails before it is published rather than telling every client
  * the wrong version.
  */
-const SERVER_VERSION = "0.6.0";
+const SERVER_VERSION = "0.7.0";
 
 /**
  * How the tools below describe their own effects to a client.
