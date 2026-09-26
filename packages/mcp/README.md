@@ -67,6 +67,7 @@ lose it.
 | `publish_files` | Publishes files Claude wrote — a page, a markdown note, several files together |
 | `publish_dir` | Publishes a folder, given its absolute path |
 | `list_sites` | Lists the sites on the account |
+| `list_folders` | Lists the account's folders, each with the path `folder` accepts |
 | `delete_site` | Deletes a site permanently, subdomain included — requires the subdomain repeated as `confirm` |
 
 Both publish tools take an optional `site` — a subdomain or site id to publish over. Leave it out and a
@@ -77,6 +78,11 @@ one. It is for a person who asked for a particular address: the name becomes the
 afterwards, and a site made under a guessed one has to be deleted by hand. `site` and `subdomain` are
 opposites — one publishes over a site that exists, the other creates one that does not — so passing both
 is refused rather than resolved.
+
+And both take an optional `folder`, which files the new site in one of the account's dashboard folders —
+by path such as `Clients/Acme`, or by the id `list_folders` shows. Like `subdomain` it only describes a new
+site, so it cannot be combined with `site`. It never creates a folder: one that does not exist is refused
+with the list of those that do, and nothing is published.
 
 Both sign-in tools answer "not approved yet" rather than failing while they wait, and calling them
 again keeps waiting on the same sign-in. Neither replaces a token that is already stored unless asked

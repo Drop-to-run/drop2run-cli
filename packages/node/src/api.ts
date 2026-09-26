@@ -1,4 +1,4 @@
-import type { Credentials } from "./config.js";
+import { type Credentials, dashboardUrlFor } from "./config.js";
 
 /**
  * The control-plane calls this server makes that the engine does not.
@@ -188,24 +188,160 @@ export async function listSites(credentials: Credentials): Promise<SiteSummary[]
  *
  * @param credentials Token and base URL.
  * @param subdomain Subdomain to ask for, or undefined to let the server generate one.
+ * @param folderId Folder to file the site in, already resolved by {@link resolveFolder}, or undefined
+ * for the top level.
  * @returns The new site, carrying the subdomain that was actually allocated.
  * @throws Error carrying the API's own wording when the name is refused.
  */
 export async function createSite(
 	credentials: Credentials,
 	subdomain?: string,
+	folderId?: string,
 ): Promise<SiteSummary> {
 	const created = await call<{ siteId: string; subdomain: string; url: string }>(
 		credentials,
 		"sites",
 		{
 			method: "POST",
-			// An absent field rather than a null one, because the API reads null, empty and missing the
-			// same way and a body carrying only what was asked for is the one that reads correctly in a
-			// log.
-			body: JSON.stringify(subdomain === undefined ? {} : { subdomain }),
+			// Absent fields rather than null ones, because the API reads null, empty and missing the same
+			// way and a body carrying only what was asked for is the one that reads correctly in a log.
+			body: JSON.stringify({
+				...(subdomain === undefined ? {} : { subdomain }),
+				...(folderId === undefined ? {} : { folderId }),
+			}),
 		},
 	);
 
 	return { ...created, name: null };
+}
+
+/** One folder the caller's sites can be filed in. */
+export interface SiteFolder {
+	/** ULID of the folder. */
+	readonly folderId: string;
+	/** Every name from the top level down to this folder, joined with `/`. */
+	readonly path: string;
+}
+
+/**
+ * Lists the account's folders, each with the path of names that leads to it.
+ *
+ * <b>Paths are built here because the API sends parent pointers.</b> `GET /site-folders` is flat on
+ * purpose — the dashboard assembles the tree — and a terminal or a chat has no tree to draw, only a
+ * name somebody typed. The path is what that name is compared against.
+ *
+ * @param credentials Token and base URL.
+ * @returns Every folder, ordered by path.
+ */
+export async function listFolders(credentials: Credentials): Promise<SiteFolder[]> {
+	const body = await call<{
+		folders: { folderId: string; parentId: string | null; name: string }[];
+	}>(credentials, "site-folders");
+
+	const byId = new Map(body.folders.map((folder) => [folder.folderId, folder]));
+
+	/**
+	 * Walks up the parent pointers from one folder.
+	 *
+	 * Bounded by the number of folders, so a cycle — which the API refuses to create, but which this
+	 * code has no way to rule out from a response — ends the walk instead of hanging the command.
+	 *
+	 * @param folderId Where to start.
+	 * @returns The names from the top level down.
+	 */
+	const pathOf = (folderId: string): string => {
+		const names: string[] = [];
+		let cursor = byId.get(folderId);
+
+		while (cursor !== undefined && names.length <= byId.size) {
+			names.unshift(cursor.name);
+			cursor = cursor.parentId === null ? undefined : byId.get(cursor.parentId);
+		}
+
+		return names.join("/");
+	};
+
+	return body.folders
+		.map((folder) => ({ folderId: folder.folderId, path: pathOf(folder.folderId) }))
+		.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/**
+ * Puts a folder path in the form two paths are compared in.
+ *
+ * Case-folded because the server refuses two sibling folders whose names differ only in case, so case
+ * never tells two folders apart. Spaces around each `/` are dropped because the server trims every
+ * name it stores, so `Clients / Acme` can only have meant `Clients/Acme`.
+ *
+ * @param path A path as typed or as built by {@link listFolders}.
+ * @returns The comparable form, empty when the path names no folder at all.
+ */
+function comparablePath(path: string): string {
+	return path
+		.split("/")
+		.map((name) => name.trim())
+		.filter((name) => name !== "")
+		.join("/")
+		.toLowerCase();
+}
+
+/** How many folders a "not found" answer lists before summarising the rest as a count. */
+const FOLDERS_LISTED_ON_MISS = 20;
+
+/**
+ * Turns the folder somebody named into the id the API wants.
+ *
+ * <b>An id or a path, and never a guess.</b> An id is what the dashboard and `list_folders` show; a
+ * path like `Clients/Acme` is what a person says. Anything that matches neither fails and lists what
+ * does exist — a folder is never created here, because a typo turned into a new folder is a site filed
+ * where nobody will look for it.
+ *
+ * <b>A name may itself contain `/`.</b> The server allows it, so `A/B` can be a folder called `A/B` at
+ * the top level or a folder `B` inside `A`. Both are paths that match, and picking one would be exactly
+ * the guess this refuses: two matches fail and ask for the id.
+ *
+ * @param credentials Token and base URL.
+ * @param folder Folder id, or its path of names from the top level.
+ * @returns The folder's id.
+ * @throws Error when nothing matches, or when the path matches more than one folder.
+ */
+export async function resolveFolder(credentials: Credentials, folder: string): Promise<string> {
+	const wanted = comparablePath(folder);
+
+	if (wanted === "") {
+		throw new Error(
+			`"${folder}" does not name a folder. Leave the folder out to put the site at the top level.`,
+		);
+	}
+
+	const folders = await listFolders(credentials);
+	const byId = folders.find((candidate) => candidate.folderId.toLowerCase() === wanted);
+
+	if (byId !== undefined) return byId.folderId;
+
+	const matches = folders.filter((candidate) => comparablePath(candidate.path) === wanted);
+
+	if (matches.length === 1 && matches[0] !== undefined) return matches[0].folderId;
+
+	if (matches.length > 1) {
+		throw new Error(
+			`More than one folder is at "${folder}", because a folder name can contain "/". Name it by ` +
+				`id instead: ${matches.map((match) => match.folderId).join(", ")}.`,
+		);
+	}
+
+	if (folders.length === 0) {
+		throw new Error(
+			`No folder of yours is called "${folder}" — this account has no folders yet. Make one in ` +
+				`the dashboard at ${dashboardUrlFor(credentials.apiBaseUrl)}, or leave the folder out.`,
+		);
+	}
+
+	const listed = folders.slice(0, FOLDERS_LISTED_ON_MISS).map((candidate) => candidate.path);
+	const more = folders.length - listed.length;
+
+	throw new Error(
+		`No folder of yours is called "${folder}". Your folders: ${listed.join(", ")}` +
+			`${more > 0 ? `, and ${more} more` : ""}.`,
+	);
 }

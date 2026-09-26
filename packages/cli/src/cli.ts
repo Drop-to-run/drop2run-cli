@@ -1,6 +1,8 @@
+import type { NewSite } from "@drop2run/node";
 import {
 	type CommandResult,
 	deployCommand,
+	folders,
 	init,
 	list,
 	login,
@@ -36,7 +38,9 @@ const HELP = `drop2run — publish a static site from the command line
   drop2run init [dir] [--site <subdomain>]     Tie this folder to a site (writes drop2run.json)
   drop2run deploy [dir] [--site <subdomain>]   Publish a folder (default: . or drop2run.json)
   drop2run init|deploy --subdomain <name>      Create a new site under a name you pick
+  drop2run init|deploy --folder <path>         File the new site in one of your folders
   drop2run ls                                  List your sites
+  drop2run folders                             List your folders, as --folder takes them
   drop2run open [site]                         Open a site in a browser
   drop2run rollback <deployId> [--site X]      Put an earlier version back live
   drop2run rm <site> --yes                     Delete a site and everything on it
@@ -49,6 +53,8 @@ Flags
   --json         Print machine-readable output instead of text
   --site X       Act on an existing site rather than the one in drop2run.json
   --subdomain X  Create a new site under this name (init and deploy only)
+  --folder X     File the new site in this folder: a path such as Clients/Acme,
+                 or a folder id (init and deploy only)
   --device       Sign in by approving a code on another machine
   --yes          Confirm a deletion, which cannot be undone
 
@@ -59,6 +65,10 @@ Where a site comes from
 
   --site only ever finds a site you already have; it never creates one, so a
   subdomain typed wrong fails instead of quietly becoming a second site.
+
+  --folder only applies to a site being created. It never creates a folder
+  and never moves an existing site; make and rearrange folders in the
+  dashboard.
 
 Signing in
   \`login\` opens a browser and listens on 127.0.0.1, so it needs both on this
@@ -93,7 +103,7 @@ function flagValue(args: readonly string[], flag: string): string | undefined {
  * Kept as one list because the parser has two questions about a flag — what its value is, and whether
  * the next word belongs to it — and answering them from two lists is how they disagree.
  */
-const VALUE_FLAGS = ["--site", "--subdomain"];
+const VALUE_FLAGS = ["--site", "--subdomain", "--folder"];
 
 /**
  * Pulls out the positional arguments, leaving flags and the values that belong to them behind.
@@ -129,45 +139,79 @@ function positionals(argv: readonly string[]): string[] {
 	return found;
 }
 
+/** How one flag that describes a new site is named in its refusals. */
+interface NewSiteFlag {
+	/** The flag as typed, such as `--subdomain`. */
+	readonly flag: string;
+	/** A value to show in the example when the flag was given without one. */
+	readonly example: string;
+	/** What the flag does to the new site, completing "`--site` publishes to a site you already have, and …". */
+	readonly effect: string;
+	/** Appended when the flag reaches a command that cannot create a site, or empty for nothing. */
+	readonly elsewhere: (command: string) => string;
+}
+
+/** `--subdomain`: the name of the site being created. */
+const SUBDOMAIN_FLAG: NewSiteFlag = {
+	flag: "--subdomain",
+	example: "my-docs",
+	effect: "`--subdomain` creates a new one",
+	elsewhere: (command) => ` Use \`--site\` to tell \`${command}\` which of your sites to act on.`,
+};
+
+/** `--folder`: where the site being created is filed. */
+const FOLDER_FLAG: NewSiteFlag = {
+	flag: "--folder",
+	example: "Clients/Acme",
+	effect: "`--folder` only files a new one — move an existing site from the dashboard",
+	elsewhere: (command) =>
+		command === "ls" || command === "list" ? " `drop2run folders` lists them." : "",
+};
+
 /**
- * Says why `--subdomain` cannot be honoured as typed, if it cannot.
+ * Says why a flag describing a new site cannot be honoured as typed, if it cannot.
  *
  * <b>Three ways to get it wrong, and each is refused rather than absorbed.</b> A flag with nothing after
  * it parses as undefined, which would otherwise be indistinguishable from not passing it — and the
- * silent outcome of that is a site created under a generated name by somebody who typed a flag
- * specifically to avoid one. Given with `--site` it contradicts it: one names a site that must already
- * exist, the other names one that must not. Given to a command that only ever acts on an existing site,
- * it has nothing to do, and ignoring it would read as having worked.
+ * silent outcome of that is a site created under a generated name, or at the top level, by somebody who
+ * typed a flag specifically to avoid that. Given with `--site` it contradicts it: `--site` names a site
+ * that must already exist, and both `--subdomain` and `--folder` describe one that does not yet. Given
+ * to a command that only ever acts on an existing site, it has nothing to do, and ignoring it would read
+ * as having worked.
  *
  * @param argv Every argument, needed to tell a flag with no value from an absent flag.
  * @param command First positional argument.
  * @param site Value of `--site`, if given.
- * @param subdomain Value of `--subdomain`, if given with one.
+ * @param value Value of the flag, if given with one.
+ * @param described Which flag, and how its refusals word it.
  * @returns The refusal to print, or undefined when the flag is fine.
  */
-function subdomainFlagProblem(
+function newSiteFlagProblem(
 	argv: readonly string[],
 	command: string,
 	site: string | undefined,
-	subdomain: string | undefined,
+	value: string | undefined,
+	described: NewSiteFlag,
 ): string | undefined {
-	if (!argv.includes("--subdomain")) return undefined;
+	const { flag, example, effect, elsewhere } = described;
 
-	if (subdomain === undefined) {
-		return "`--subdomain` needs a name after it, for example `--subdomain my-docs`.";
+	if (!argv.includes(flag)) return undefined;
+
+	if (value === undefined) {
+		return `\`${flag}\` needs a value after it, for example \`${flag} ${example}\`.`;
 	}
 
 	if (site !== undefined) {
 		return (
-			"`--site` and `--subdomain` cannot both be given: `--site` publishes to a site you already " +
-			"have, and `--subdomain` creates a new one. Drop whichever is not what you meant."
+			`\`--site\` and \`${flag}\` cannot both be given: \`--site\` publishes to a site you already ` +
+			`have, and ${effect}. Drop whichever is not what you meant.`
 		);
 	}
 
 	if (command !== "init" && command !== "deploy") {
 		return (
-			`\`--subdomain\` only applies to \`init\` and \`deploy\`, which can create a site. Use ` +
-			`\`--site\` to tell \`${command}\` which of your sites to act on.`
+			`\`${flag}\` only applies to \`init\` and \`deploy\`, which can create a site.` +
+			elsewhere(command)
 		);
 	}
 
@@ -205,8 +249,11 @@ export async function run(argv: readonly string[]): Promise<CommandResult> {
 
 	const site = flagValue(argv, "--site");
 	const subdomain = flagValue(argv, "--subdomain");
+	const folder = flagValue(argv, "--folder");
 
-	const refusal = subdomainFlagProblem(argv, command, site, subdomain);
+	const refusal =
+		newSiteFlagProblem(argv, command, site, subdomain, SUBDOMAIN_FLAG) ??
+		newSiteFlagProblem(argv, command, site, folder, FOLDER_FLAG);
 	if (refusal !== undefined) {
 		const failed = { text: refusal, json: { error: refusal }, code: 1 };
 
@@ -220,7 +267,7 @@ export async function run(argv: readonly string[]): Promise<CommandResult> {
 		json,
 		argv.includes("--device"),
 		argv.includes("--yes"),
-		subdomain,
+		{ subdomain, folder },
 	);
 
 	return json ? { ...result, text: JSON.stringify(result.json, null, 2) } : result;
@@ -237,7 +284,7 @@ export async function run(argv: readonly string[]): Promise<CommandResult> {
  * with a JSON document is not JSON.
  * @param device Whether `--device` was given, which picks between the two sign-in flows.
  * @param confirmed Whether `--yes` was given, which is the only confirmation a deletion gets.
- * @param subdomain Value of `--subdomain`, already checked against the command and `--site`.
+ * @param newSite Values of `--subdomain` and `--folder`, already checked against the command and `--site`.
  * @returns The command's result.
  */
 async function dispatch(
@@ -247,7 +294,7 @@ async function dispatch(
 	json: boolean,
 	device: boolean,
 	confirmed: boolean,
-	subdomain?: string,
+	newSite: NewSite = {},
 ): Promise<CommandResult> {
 	switch (command) {
 		case "login": {
@@ -262,7 +309,7 @@ async function dispatch(
 		case "logout":
 			return logout();
 		case "init":
-			return await init(rest[0] ?? ".", site, subdomain);
+			return await init(rest[0] ?? ".", site, newSite);
 		case "deploy": {
 			// Progress on stderr, for the same reason `login` puts it there: a shell reading stdout gets
 			// the URL and nothing else, with or without --json. Suppressed entirely under --json, where
@@ -277,11 +324,13 @@ async function dispatch(
 
 			// Undefined rather than "." so `deployCommand` can tell "no folder given" from "this folder",
 			// which is what lets drop2run.json supply one.
-			return await deployCommand(rest[0], site, report, subdomain);
+			return await deployCommand(rest[0], site, report, newSite);
 		}
 		case "ls":
 		case "list":
 			return await list();
+		case "folders":
+			return await folders();
 		case "open":
 			return await open(rest[0] ?? site);
 		case "rollback":

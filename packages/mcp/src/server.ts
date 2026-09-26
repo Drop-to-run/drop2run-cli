@@ -2,6 +2,7 @@ import {
 	type Credentials,
 	deleteSite,
 	findSite,
+	listFolders,
 	listSites,
 	loadCredentials,
 	missingCredentialsMessage,
@@ -14,7 +15,7 @@ import { z } from "zod";
 import { MAX_WAIT_SECONDS, signInWithBrowser, signInWithCode } from "./auth.js";
 
 /**
- * The MCP surface: four tools that need a token, and two that get one.
+ * The MCP surface: five tools that need a token, and two that get one.
  *
  * <b>Every tool answers, none of them throws at startup.</b> A server with no credential is
  * unconfigured rather than broken, and the difference is what the person sees: a sentence in the chat
@@ -134,6 +135,32 @@ const SITE_OUTPUT = z.object({
 	url: z.string().describe("Its live URL."),
 	name: z.string().nullable().describe("What it is called, or null when it has no name."),
 });
+
+/** One folder, as `list_folders` reports it. */
+const FOLDER_OUTPUT = z.object({
+	folderId: z.string().describe("Identifier of the folder, which `folder` accepts."),
+	path: z
+		.string()
+		.describe(
+			"Every name from the top level down to it, joined with /, which `folder` accepts too.",
+		),
+});
+
+/**
+ * `folder` on both publish tools.
+ *
+ * Shared for the reason {@link PUBLISH_OUTPUT} is: the two tools differ in where files come from, not
+ * in where a new site goes, and two descriptions of one argument are two chances for them to disagree.
+ */
+const FOLDER_INPUT = z
+	.string()
+	.optional()
+	.describe(
+		"Folder to file the new site in, when the person asked for one: its path of names such as " +
+			"Clients/Acme, or its id from list_folders. Only for a new site — do not pass it together " +
+			"with `site`; moving an existing site is done in the dashboard. It never creates a folder: a " +
+			"folder that does not exist is refused with the list of those that do, and nothing is published.",
+	);
 
 /** What a tool hands back to the client. */
 type ToolResult = {
@@ -257,6 +284,10 @@ export function createServer(): McpServer {
 				"be deleted by hand. `site` and `subdomain` are opposites: one publishes over a site that",
 				"exists, the other creates one that does not. Never pass both.",
 				"",
+				"A new site goes at the top level of the dashboard unless `folder` files it somewhere. Pass",
+				"it when the person named a folder, as its path (Clients/Acme) or its id; list_folders shows",
+				"what exists. Like `subdomain`, it only describes a new site, so never pass it with `site`.",
+				"",
 				"A site needs an index.html at its top level, or at least one document (.md, .markdown,",
 				".pdf, .docx, .xlsx or .epub), which publishes as a documents site and is read through a",
 				"viewer. So one page goes at index.html, and a single note is a whole publish that needs",
@@ -365,13 +396,14 @@ export function createServer(): McpServer {
 							"name is the URL somebody will be given, it cannot be changed afterwards, and " +
 							"an unused site made under a guessed name has to be deleted by hand.",
 					),
+				folder: FOLDER_INPUT,
 			},
 			outputSchema: PUBLISH_OUTPUT,
 			annotations: REPLACES_A_SITE,
 		},
-		({ files, site, subdomain }) =>
+		({ files, site, subdomain, folder }) =>
 			withCredentials(async (credentials) => {
-				const result = await publishFiles(credentials, files, site, subdomain);
+				const result = await publishFiles(credentials, files, site, { subdomain, folder });
 
 				return report(describe(result), { ...result });
 			}),
@@ -400,13 +432,17 @@ export function createServer(): McpServer {
 							"name is the URL somebody will be given, it cannot be changed afterwards, and " +
 							"an unused site made under a guessed name has to be deleted by hand.",
 					),
+				folder: FOLDER_INPUT,
 			},
 			outputSchema: PUBLISH_OUTPUT,
 			annotations: REPLACES_A_SITE,
 		},
-		({ path, site, subdomain }) =>
+		({ path, site, subdomain, folder }) =>
 			withCredentials(async (credentials) => {
-				const result = await publishDirectory(credentials, path, site, undefined, subdomain);
+				const result = await publishDirectory(credentials, path, site, undefined, {
+					subdomain,
+					folder,
+				});
 
 				return report(describe(result), { ...result });
 			}),
@@ -487,6 +523,33 @@ export function createServer(): McpServer {
 								.join("\n");
 
 				return report(text, { sites: sites.map((site) => ({ ...site })) });
+			}),
+	);
+
+	server.registerTool(
+		"list_folders",
+		{
+			title: "List folders",
+			description:
+				"Lists the folders on this account, each with the path a publish's `folder` accepts. " +
+				"Folders are made and rearranged in the dashboard; no tool here creates one.",
+			inputSchema: {},
+			outputSchema: {
+				folders: z.array(FOLDER_OUTPUT).describe("Every folder on this account, ordered by path."),
+			},
+			annotations: READS_ONLY,
+		},
+		() =>
+			withCredentials(async (credentials) => {
+				const folders = await listFolders(credentials);
+				// The empty case carries the empty array, for the reason `list_sites` gives.
+				const text =
+					folders.length === 0
+						? "No folders on this account. A new site goes at the top level; folders are made in " +
+							"the dashboard."
+						: folders.map((folder) => `${folder.path} — ${folder.folderId}`).join("\n");
+
+				return report(text, { folders: folders.map((folder) => ({ ...folder })) });
 			}),
 	);
 

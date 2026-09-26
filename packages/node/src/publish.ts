@@ -5,7 +5,7 @@ import {
 	type ProgressEvent,
 	type ProgressListener,
 } from "@drop2run/core";
-import { createSite, listSites, type SiteSummary } from "./api.js";
+import { createSite, listSites, resolveFolder, type SiteSummary } from "./api.js";
 import type { Credentials } from "./config.js";
 import { directorySource } from "./source.js";
 
@@ -31,6 +31,20 @@ export interface PublishResult {
 }
 
 /**
+ * What a publish that creates a site asks of that site.
+ *
+ * <b>An object rather than two more positional parameters.</b> Both fields only matter when no existing
+ * site is named, both are optional, and a sixth positional `undefined` at every call site is how a
+ * folder ends up passed where a subdomain was meant.
+ */
+export interface NewSite {
+	/** Subdomain to create the site under, or undefined to let the server name it. */
+	readonly subdomain?: string | undefined;
+	/** Folder to file the site in — an id, or a path of names such as `Clients/Acme` — or undefined. */
+	readonly folder?: string | undefined;
+}
+
+/**
  * Finds the site to publish to, creating one when the caller named none.
  *
  * <b>Never guesses.</b> Given no site, it makes a new one rather than reusing the most recent — the
@@ -43,30 +57,45 @@ export interface PublishResult {
  * must already exist; the other names one that must not. Taken together they have no meaning, and
  * picking either would be a guess about which the caller meant.
  *
+ * <b>So is `folder`.</b> It says where a new site is filed. Given with `site` it could only mean "move
+ * that site", which is a different request with a different effect on the dashboard, and quietly
+ * ignoring it would read as having worked. The folder is resolved before the site is created, so a
+ * folder that does not exist costs nothing — no site, and no subdomain held by one.
+ *
  * @param credentials Token and base URL.
  * @param site Subdomain or site id the caller named, or undefined.
- * @param subdomain Subdomain to create a new site under, or undefined.
+ * @param newSite What a new site should be called and where it is filed.
  * @returns The site to publish to.
- * @throws Error when a named site does not exist, when both arguments are given, or when the server
- * refuses the requested name.
+ * @throws Error when a named site or folder does not exist, when `site` is combined with anything in
+ * `newSite`, or when the server refuses the requested name.
  */
 async function resolveSite(
 	credentials: Credentials,
-	site?: string,
-	subdomain?: string,
+	site: string | undefined,
+	newSite: NewSite,
 ): Promise<SiteSummary> {
-	if (subdomain !== undefined) {
-		if (site !== undefined) {
-			throw new Error(
-				"Give either an existing site or a subdomain for a new one, not both: publishing over a " +
-					"site and creating one are different requests.",
-			);
-		}
+	const { subdomain, folder } = newSite;
 
-		return await createSite(credentials, subdomain);
+	if (site !== undefined && subdomain !== undefined) {
+		throw new Error(
+			"Give either an existing site or a subdomain for a new one, not both: publishing over a " +
+				"site and creating one are different requests.",
+		);
 	}
 
-	if (site === undefined) return await createSite(credentials);
+	if (site !== undefined && folder !== undefined) {
+		throw new Error(
+			"A folder only says where a new site goes, so it cannot be given with an existing site. " +
+				"Leave the site out to create one in that folder, or move the existing site from the " +
+				"dashboard.",
+		);
+	}
+
+	if (site === undefined) {
+		const folderId = folder === undefined ? undefined : await resolveFolder(credentials, folder);
+
+		return await createSite(credentials, subdomain, folderId);
+	}
 
 	const wanted = site.trim().toLowerCase();
 	const found = (await listSites(credentials)).find(
@@ -95,8 +124,7 @@ async function resolveSite(
  * @param site Subdomain or site id to publish to, or undefined for a new site.
  * @param onProgress Receives every stage the engine reports, for a caller that has somewhere to draw
  * them. A tool returning one message does not pass this; a terminal that can rewrite a line does.
- * @param subdomain Subdomain to create a new site under, or undefined to let the server name it. Last
- * rather than beside `site` so that every existing caller keeps compiling and keeps meaning what it did.
+ * @param newSite Name and folder for the site this creates, when `site` is undefined. See {@link NewSite}.
  * @returns What to tell the caller.
  * @throws Error when the deploy fails, carrying the engine's message.
  */
@@ -105,9 +133,9 @@ export async function publish(
 	source: DeploySource,
 	site?: string,
 	onProgress?: ProgressListener,
-	subdomain?: string,
+	newSite: NewSite = {},
 ): Promise<PublishResult> {
-	const target = await resolveSite(credentials, site, subdomain);
+	const target = await resolveSite(credentials, site, newSite);
 
 	let files = 0;
 	let url = target.url;
@@ -171,7 +199,7 @@ export async function publish(
  * @param directory Absolute path of the folder to publish.
  * @param site Subdomain or site id, or undefined for a new site.
  * @param onProgress Receives every stage the engine reports. See {@link publish}.
- * @param subdomain Subdomain to create a new site under. See {@link publish}.
+ * @param newSite Name and folder for the site this creates. See {@link publish}.
  * @returns What to tell the caller.
  * @throws Error when the path does not exist or is not a directory.
  */
@@ -180,14 +208,14 @@ export async function publishDirectory(
 	directory: string,
 	site?: string,
 	onProgress?: ProgressListener,
-	subdomain?: string,
+	newSite: NewSite = {},
 ): Promise<PublishResult> {
 	const found = await stat(directory).catch(() => null);
 
 	if (found === null) throw new Error(`There is no folder at ${directory}.`);
 	if (!found.isDirectory()) throw new Error(`${directory} is a file, not a folder to publish.`);
 
-	return await publish(credentials, directorySource(directory), site, onProgress, subdomain);
+	return await publish(credentials, directorySource(directory), site, onProgress, newSite);
 }
 
 /** One file a caller wrote, rather than one read off a disk. */
@@ -246,7 +274,7 @@ function cleanPath(path: string): string {
  * @param credentials Token and base URL.
  * @param files What to publish, each with a path relative to the site root.
  * @param site Subdomain or site id, or undefined for a new site.
- * @param subdomain Subdomain to create a new site under. See {@link publish}.
+ * @param newSite Name and folder for the site this creates. See {@link publish}.
  * @returns What to tell the caller.
  * @throws Error when a path names nothing usable, or two files claim the same one.
  */
@@ -254,7 +282,7 @@ export async function publishFiles(
 	credentials: Credentials,
 	files: readonly AuthoredFile[],
 	site?: string,
-	subdomain?: string,
+	newSite: NewSite = {},
 ): Promise<PublishResult> {
 	const encoder = new TextEncoder();
 	const collected = files.map((file) => ({
@@ -270,5 +298,5 @@ export async function publishFiles(
 		seen.add(file.path);
 	}
 
-	return publish(credentials, async () => collected, site, undefined, subdomain);
+	return publish(credentials, async () => collected, site, undefined, newSite);
 }

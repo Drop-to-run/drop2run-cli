@@ -450,6 +450,177 @@ describe("--subdomain", () => {
 	});
 });
 
+describe("--folder", () => {
+	/** The working directory, redirected for the same reason as in the `--subdomain` group. */
+	let realCwd: string;
+
+	beforeEach(() => {
+		realCwd = process.cwd();
+		process.chdir(mkdtempSync(join(tmpdir(), "drop2run-cli-project-")));
+	});
+
+	afterEach(() => {
+		process.chdir(realCwd);
+	});
+
+	/** `Clients` with `Acme` inside it, as `GET /site-folders` sends them. */
+	const tree = [
+		{ folderId: "01JCLIENTS", parentId: null, name: "Clients" },
+		{ folderId: "01JACME", parentId: "01JCLIENTS", name: "Acme" },
+	];
+
+	/**
+	 * Answers the folder listing and site creation, recording what creation was sent.
+	 *
+	 * @returns The bodies of every `POST /sites`.
+	 */
+	function stubFolders(): string[] {
+		const bodies: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL, init?: RequestInit) => {
+				const url = String(input);
+
+				if (url.endsWith("/site-folders")) {
+					return Response.json({ folders: tree, maxFolders: 500, maxDepth: 5 });
+				}
+
+				if (url.endsWith("/sites") && init?.method === "POST") bodies.push(String(init.body));
+
+				return Response.json({
+					siteId: "01JNEW",
+					subdomain: "calm-cedar",
+					url: "https://calm-cedar.dropto.live",
+				});
+			}),
+		);
+
+		return bodies;
+	}
+
+	it("files the site `init` creates in the folder the path names", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const bodies = stubFolders();
+
+		const result = await run(["init", "dist", "--folder", "Clients/Acme"]);
+
+		expect(result.code).toBe(0);
+		expect(bodies).toEqual(['{"folderId":"01JACME"}']);
+	});
+
+	it("is not read as the folder to publish", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		stubFolders();
+
+		await run(["init", "--folder", "Clients", "--json"]);
+
+		expect(JSON.parse(readFileSync("drop2run.json", "utf8")).dir).toBe(".");
+	});
+
+	it("creates no site for a folder that does not exist, and names the ones that do", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const bodies = stubFolders();
+
+		const result = await run(["init", "dist", "--folder", "Clients/Acmee"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("Clients/Acme");
+		expect(bodies).toEqual([]);
+	});
+
+	it("refuses to be given with --site, since it only files a site being created", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const fetched = vi.fn(async () => Response.json({}));
+		vi.stubGlobal("fetch", fetched);
+
+		const result = await run(["deploy", "--site", "calm-cedar", "--folder", "Clients"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("dashboard");
+		expect(fetched).not.toHaveBeenCalled();
+	});
+
+	it("refuses a flag with nothing after it, rather than filing the site at the top level", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const fetched = vi.fn(async () => Response.json({}));
+		vi.stubGlobal("fetch", fetched);
+
+		const result = await run(["deploy", "dist", "--folder"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("--folder Clients/Acme");
+		expect(fetched).not.toHaveBeenCalled();
+	});
+
+	it("refuses on a command that cannot create a site, rather than ignoring it", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const fetched = vi.fn(async () => Response.json({}));
+		vi.stubGlobal("fetch", fetched);
+
+		const result = await run(["ls", "--folder", "Clients"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("drop2run folders");
+		expect(fetched).not.toHaveBeenCalled();
+	});
+
+	it("refuses in a project that already publishes somewhere, rather than making a second site", async () => {
+		// `deploy --folder Clients` next to a drop2run.json reads as "move my site into Clients" as
+		// easily as "make a new one there". Guessing the second leaves the real site where it was and
+		// the person looking at a URL they did not expect.
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		writeFileSync(
+			"drop2run.json",
+			JSON.stringify({ siteId: "01JOLD", subdomain: "old-site", dir: "." }),
+		);
+		const fetched = vi.fn(async () => Response.json({}));
+		vi.stubGlobal("fetch", fetched);
+
+		const result = await run(["deploy", "--folder", "Clients"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("old-site");
+		expect(fetched).not.toHaveBeenCalled();
+	});
+});
+
+describe("folders", () => {
+	it("prints one path per line with its id, so a line pastes straight after --folder", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				Response.json({
+					folders: [
+						{ folderId: "01JCLIENTS", parentId: null, name: "Clients" },
+						{ folderId: "01JACME", parentId: "01JCLIENTS", name: "Acme" },
+					],
+					maxFolders: 500,
+					maxDepth: 5,
+				}),
+			),
+		);
+
+		const result = await run(["folders"]);
+
+		expect(result.code).toBe(0);
+		expect(result.text).toBe("Clients\t01JCLIENTS\nClients/Acme\t01JACME");
+	});
+
+	it("says there are none and where to make one, rather than printing an empty answer", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ folders: [], maxFolders: 500, maxDepth: 5 })),
+		);
+
+		const result = await run(["folders"]);
+
+		expect(result.code).toBe(0);
+		expect(result.text).toContain("No folders yet");
+	});
+});
+
 describe("a flag's value", () => {
 	/** A folder to publish, so a deploy that reads the right one has something to read. */
 	let folder: string;

@@ -18,7 +18,9 @@ drop2run logout                              Remove the stored token
 drop2run init [dir] [--site <subdomain>]     Tie this folder to a site
 drop2run deploy [dir] [--site <subdomain>]   Publish a folder
 drop2run init|deploy --subdomain <name>      Create a new site under a name you pick
+drop2run init|deploy --folder <path>         File the new site in one of your folders
 drop2run ls                                  List your sites
+drop2run folders                             List your folders, as --folder takes them
 drop2run open [site]                         Open a site in a browser
 drop2run rollback <deployId> [--site X]      Put an earlier version back live
 drop2run rm <site> --yes                     Delete a site and everything on it
@@ -51,6 +53,17 @@ which is not undoable.
 
 `--site` never creates anything: it finds a site you already have, and fails when nothing matches. That
 is what keeps a subdomain typed one letter wrong from quietly becoming a second site.
+
+`--folder` files the site being created in one of your dashboard folders — by path, as `drop2run folders`
+prints it, or by folder id:
+
+```bash
+drop2run init dist --folder Clients/Acme
+```
+
+Case does not matter. It never creates a folder and never moves an existing site, so it cannot be given
+with `--site`, or to `deploy` in a project whose `drop2run.json` already names a site; a folder that does
+not exist is refused with the list of those that do, before any site is made.
 
 `deploy` never creates a second site while a `drop2run.json` sits next to it — that would leave the real
 site untouched and you looking at a URL you did not expect.

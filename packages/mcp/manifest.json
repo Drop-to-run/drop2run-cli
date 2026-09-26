@@ -50,6 +50,10 @@
 			"description": "Lists the sites on this account, so a publish can go to one of them."
 		},
 		{
+			"name": "list_folders",
+			"description": "Lists the folders on this account, so a new site can be filed in one of them."
+		},
+		{
 			"name": "delete_site",
 			"description": "Takes a site down permanently, including its subdomain. Requires the subdomain repeated back as confirmation."
 		}

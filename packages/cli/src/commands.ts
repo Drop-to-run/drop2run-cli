@@ -11,10 +11,12 @@ import {
 	exchange,
 	findSite,
 	listen,
+	listFolders,
 	listSites,
 	listTokens,
 	loadCredentials,
 	missingCredentialsMessage,
+	type NewSite,
 	newAttempt,
 	// Shared with `open`: the same three platform launchers, and the same "failure is not fatal" rule.
 	openBrowser,
@@ -25,6 +27,7 @@ import {
 	publishDirectory,
 	readProject,
 	resolveApiBaseUrl,
+	resolveFolder,
 	saveToken,
 	startDevice,
 	TOKEN_VARIABLE,
@@ -328,6 +331,42 @@ export async function list(): Promise<CommandResult> {
 }
 
 /**
+ * Lists the account's folders, one path per line, so `--folder` has something to be copied from.
+ *
+ * Paths rather than a drawn tree, because a path is exactly what `--folder` takes: a line of this output
+ * pasted after the flag is a working command, and a tree would have to be read back into one.
+ *
+ * @returns The result.
+ */
+export async function folders(): Promise<CommandResult> {
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	try {
+		const all = await listFolders(found.credentials);
+
+		if (all.length === 0) {
+			return {
+				text:
+					"No folders yet. Make one in the dashboard at " +
+					`${dashboardUrlFor(found.credentials.apiBaseUrl)}, then file a new site in it with ` +
+					"`--folder`.",
+				json: { folders: [] },
+				code: 0,
+			};
+		}
+
+		return {
+			text: all.map((folder) => `${folder.path}\t${folder.folderId}`).join("\n"),
+			json: { folders: all },
+			code: 0,
+		};
+	} catch (error) {
+		return failure(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/**
  * Publishes a folder.
  *
  * <b>Four sources for "which site", in one order.</b> `--subdomain` wins, then `--site` because it was
@@ -349,17 +388,22 @@ export async function list(): Promise<CommandResult> {
  * that name, and there is no reading of it that refers to the project file. It is refused alongside
  * `--site` before this is called — see `run` — so the two cannot both be set here.
  *
+ * <b>`--folder` does not outrank the project file.</b> It files a *new* site, and on its own it is not
+ * a request for one — `deploy --folder Clients` in a project that already publishes somewhere reads
+ * just as well as "move my site into Clients". That is a different request, so it is refused and named
+ * rather than answered by creating a second site nobody asked for.
+ *
  * @param directory Folder to publish, or undefined to use the project file and then the working directory.
  * @param site Subdomain or site id to publish over, or undefined to use the project file.
  * @param report Receives progress, injectable so a test does not print and `--json` can suppress it.
- * @param subdomain Subdomain to create a new site under, or undefined to publish to an existing one.
+ * @param newSite Name and folder for a new site. A subdomain here means a new site is wanted.
  * @returns The result.
  */
 export async function deployCommand(
 	directory: string | undefined,
 	site?: string,
 	report: ProgressWriter = silentProgress,
-	subdomain?: string,
+	newSite: NewSite = {},
 ): Promise<CommandResult> {
 	const found = credentialsOr();
 	if ("result" in found) return found.result;
@@ -370,7 +414,17 @@ export async function deployCommand(
 	// Only when no name was typed for a new site. Passing both the project file's site and a subdomain
 	// would ask to publish over a site and to create one in the same call, which is refused below rather
 	// than resolved by preferring one — see `resolveSite`.
-	const target = subdomain === undefined ? (site ?? project?.siteId) : undefined;
+	const target = newSite.subdomain === undefined ? (site ?? project?.siteId) : undefined;
+
+	// `--site` with `--folder` never gets here — `run` refuses it — so a target at this point came from
+	// the project file, and the refusal names that file rather than a flag nobody typed.
+	if (newSite.folder !== undefined && target !== undefined && project !== null) {
+		return failure(
+			`This folder's ${PROJECT_FILE} already publishes to ${project.subdomain || project.siteId}, and ` +
+				"`--folder` only files a new site. Move that site from the dashboard, or add " +
+				"`--subdomain` to create a new one in the folder.",
+		);
+	}
 
 	try {
 		const result = await publishDirectory(
@@ -378,7 +432,7 @@ export async function deployCommand(
 			resolve(folder),
 			target,
 			report,
-			subdomain,
+			newSite,
 		);
 		const what = result.unchanged
 			? "Already up to date — nothing needed publishing."
@@ -415,15 +469,18 @@ export async function deployCommand(
  * because `--site` that matches nothing must keep failing: a typo turned into a new site under the
  * typo's name is a mistake nobody notices until the old URL is asked for.
  *
+ * <b>`--folder` files the site it creates</b>, and is resolved before anything is created: a folder that
+ * does not exist fails with the list of those that do, and leaves no site behind.
+ *
  * @param directory Folder to publish, relative to the working directory.
  * @param site Subdomain or site id of an existing site, or undefined to create one.
- * @param subdomain Subdomain to create the new site under, or undefined for a generated one.
+ * @param newSite Name and folder for the site this creates, when `site` is undefined.
  * @returns The result.
  */
 export async function init(
 	directory: string,
 	site?: string,
-	subdomain?: string,
+	newSite: NewSite = {},
 ): Promise<CommandResult> {
 	const found = credentialsOr();
 	if ("result" in found) return found.result;
@@ -437,7 +494,13 @@ export async function init(
 	try {
 		const target =
 			site === undefined
-				? await createSite(found.credentials, subdomain)
+				? await createSite(
+						found.credentials,
+						newSite.subdomain,
+						newSite.folder === undefined
+							? undefined
+							: await resolveFolder(found.credentials, newSite.folder),
+					)
 				: await findSite(found.credentials, site);
 
 		const project: Project = {

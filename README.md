@@ -36,8 +36,8 @@ and there is no config file and nothing to install first. Claude Code takes one 
 claude mcp add drop2run -s user -- npx -y @drop2run/mcp
 ```
 
-It exposes six tools — `publish_files`, `publish_dir`, `list_sites`, `delete_site`, and `login` /
-`login_code` to get a token without leaving the chat. The publishes answer with structured fields
+It exposes seven tools — `publish_files`, `publish_dir`, `list_sites`, `list_folders`, `delete_site`,
+and `login` / `login_code` to get a token without leaving the chat. The publishes answer with structured fields
 beside the sentence, so a URL does not have to be read back out of prose; `delete_site` is permanent
 and asks for the site's subdomain repeated back before it runs. The token goes to the same place the
 CLI stores one, so signing in through either covers both.

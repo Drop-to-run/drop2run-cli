@@ -38,9 +38,10 @@ interface Recorded {
  * Answers the whole deploy sequence, recording every request.
  *
  * @param sites What `GET /sites` returns.
+ * @param folders What `GET /site-folders` returns.
  * @returns The recorded requests, filled in as they happen.
  */
-function stubApi(sites: unknown[] = []): Recorded[] {
+function stubApi(sites: unknown[] = [], folders: unknown[] = []): Recorded[] {
 	const seen: Recorded[] = [];
 
 	vi.stubGlobal(
@@ -57,6 +58,10 @@ function stubApi(sites: unknown[] = []): Recorded[] {
 
 			if (url.endsWith("/api/sites") && (init?.method ?? "GET") === "GET") {
 				return Response.json({ sites });
+			}
+
+			if (url.endsWith("/api/site-folders")) {
+				return Response.json({ folders, maxFolders: 500, maxDepth: 5 });
 			}
 
 			if (url.endsWith("/api/sites") && init?.method === "POST") {
@@ -181,7 +186,7 @@ describe("publishing to a new site under a name the caller picked", () => {
 		// that disagrees — refusing a name the server would have taken, with wording nobody can act on.
 		const seen = stubApi([]);
 
-		await publishFiles(credentials, [page], undefined, "my-docs");
+		await publishFiles(credentials, [page], undefined, { subdomain: "my-docs" });
 
 		const created = seen.find(
 			(request) => request.method === "POST" && request.url.endsWith("/api/sites"),
@@ -193,7 +198,7 @@ describe("publishing to a new site under a name the caller picked", () => {
 	it("does not look at the existing sites first, since the name is for one that does not exist", async () => {
 		const seen = stubApi([]);
 
-		await publishFiles(credentials, [page], undefined, "my-docs");
+		await publishFiles(credentials, [page], undefined, { subdomain: "my-docs" });
 
 		expect(
 			seen.some((request) => request.method === "GET" && request.url.endsWith("/api/sites")),
@@ -207,13 +212,9 @@ describe("publishing to a new site under a name the caller picked", () => {
 		const seen = stubApi([]);
 
 		await expect(
-			publishDirectory(
-				credentials,
-				"/tmp/drop2run-no-such-folder",
-				undefined,
-				undefined,
-				"my-docs",
-			),
+			publishDirectory(credentials, "/tmp/drop2run-no-such-folder", undefined, undefined, {
+				subdomain: "my-docs",
+			}),
 		).rejects.toThrow(/no folder/);
 
 		expect(seen).toEqual([]);
@@ -222,11 +223,131 @@ describe("publishing to a new site under a name the caller picked", () => {
 	it("refuses a site and a subdomain together rather than guessing which was meant", async () => {
 		const seen = stubApi([]);
 
-		await expect(publishFiles(credentials, [page], "old-site", "my-docs")).rejects.toThrow(/both/);
+		await expect(
+			publishFiles(credentials, [page], "old-site", { subdomain: "my-docs" }),
+		).rejects.toThrow(/both/);
 
 		// Nothing was created and nothing was published: a request that contradicts itself has no
 		// half-carried-out version worth leaving behind.
 		expect(seen).toEqual([]);
+	});
+});
+
+/** A small folder tree: `Clients`, `Clients/Acme`, and `Drafts`. */
+const folders = [
+	{ folderId: "01JFOLDERCLIENTS0000000000", parentId: null, name: "Clients" },
+	{ folderId: "01JFOLDERACME000000000000", parentId: "01JFOLDERCLIENTS0000000000", name: "Acme" },
+	{ folderId: "01JFOLDERDRAFTS0000000000", parentId: null, name: "Drafts" },
+];
+
+/**
+ * The body of the one request that created a site.
+ *
+ * @param seen Every request a publish made.
+ * @returns What was sent to `POST /sites`, or undefined when no site was created.
+ */
+function createdBody(seen: readonly Recorded[]): string | null | undefined {
+	return seen.find((request) => request.method === "POST" && request.url.endsWith("/api/sites"))
+		?.body;
+}
+
+describe("publishing to a new site filed in a folder", () => {
+	it("sends the id of the folder a path of names leads to", async () => {
+		const seen = stubApi([], folders);
+
+		await publishFiles(credentials, [page], undefined, { folder: "Clients/Acme" });
+
+		expect(createdBody(seen)).toBe('{"folderId":"01JFOLDERACME000000000000"}');
+	});
+
+	it("reads a path the way the server compares names: ignoring case and the spaces around a slash", async () => {
+		// The server refuses two sibling folders whose names differ only in case, and trims every name
+		// it stores. So neither case nor those spaces can tell two folders apart, and refusing over them
+		// would be a mistake about the caller rather than about the tree.
+		const seen = stubApi([], folders);
+
+		await publishFiles(credentials, [page], undefined, { folder: " clients / ACME/" });
+
+		expect(createdBody(seen)).toBe('{"folderId":"01JFOLDERACME000000000000"}');
+	});
+
+	it("takes a folder id as it is", async () => {
+		const seen = stubApi([], folders);
+
+		await publishFiles(credentials, [page], undefined, { folder: "01JFOLDERDRAFTS0000000000" });
+
+		expect(createdBody(seen)).toBe('{"folderId":"01JFOLDERDRAFTS0000000000"}');
+	});
+
+	it("sends a name and a folder together, since both describe the one site being made", async () => {
+		const seen = stubApi([], folders);
+
+		await publishFiles(credentials, [page], undefined, { subdomain: "my-docs", folder: "Drafts" });
+
+		expect(createdBody(seen)).toBe(
+			'{"subdomain":"my-docs","folderId":"01JFOLDERDRAFTS0000000000"}',
+		);
+	});
+
+	it("creates nothing for a folder that does not exist, and lists the ones that do", async () => {
+		// A folder is never created here. A typo that became a new folder would file the site where
+		// nobody looks for it; one that fell back to the top level would read as having worked.
+		const seen = stubApi([], folders);
+
+		await expect(
+			publishFiles(credentials, [page], undefined, { folder: "Clients/Acmee" }),
+		).rejects.toThrow(/Clients\/Acme, Drafts/);
+
+		expect(createdBody(seen)).toBeUndefined();
+	});
+
+	it("says so when the account has no folders at all, rather than listing nothing", async () => {
+		stubApi([], []);
+
+		await expect(
+			publishFiles(credentials, [page], undefined, { folder: "Clients" }),
+		).rejects.toThrow(/no folders yet.*https:\/\/api\.test\b/);
+	});
+
+	it("refuses a path two folders share rather than picking one", async () => {
+		// A folder name may contain "/", so "A/B" is both a top-level folder called that and B inside A.
+		const seen = stubApi(
+			[],
+			[
+				{ folderId: "01JFOLDERA0000000000000000", parentId: null, name: "A" },
+				{
+					folderId: "01JFOLDERAB000000000000000",
+					parentId: "01JFOLDERA0000000000000000",
+					name: "B",
+				},
+				{ folderId: "01JFOLDERSLASH00000000000", parentId: null, name: "A/B" },
+			],
+		);
+
+		const refusal = publishFiles(credentials, [page], undefined, { folder: "A/B" });
+
+		await expect(refusal).rejects.toThrow(/01JFOLDERAB000000000000000/);
+		await expect(refusal).rejects.toThrow(/01JFOLDERSLASH00000000000/);
+		expect(createdBody(seen)).toBeUndefined();
+	});
+
+	it("refuses a folder with an existing site, since moving a site is not what a publish does", async () => {
+		const seen = stubApi([], folders);
+
+		await expect(
+			publishFiles(credentials, [page], "old-site", { folder: "Drafts" }),
+		).rejects.toThrow(/new site/);
+
+		expect(seen).toEqual([]);
+	});
+
+	it("does not ask about folders when none was named", async () => {
+		const seen = stubApi([], folders);
+
+		await publishFiles(credentials, [page]);
+
+		expect(seen.some((request) => request.url.endsWith("/api/site-folders"))).toBe(false);
+		expect(createdBody(seen)).toBe("{}");
 	});
 });
 

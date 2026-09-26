@@ -61,11 +61,12 @@ afterEach(async () => {
 });
 
 describe("the tool surface", () => {
-	it("offers exactly the six tools the README documents", async () => {
+	it("offers exactly the seven tools the README documents", async () => {
 		const { tools } = await (await connect()).listTools();
 
 		expect(tools.map((tool) => tool.name).sort()).toEqual([
 			"delete_site",
+			"list_folders",
 			"list_sites",
 			"login",
 			"login_code",
@@ -136,6 +137,28 @@ describe("the tool surface", () => {
 		}
 	});
 
+	it("lets either publish file the new site in a folder, and tells a model it is only for a new one", async () => {
+		// Optional for the reason `subdomain` is: required, a model would have to pick a folder for every
+		// note. And the description has to carry the `site` rule, because the engine refuses the pair and
+		// a model should not learn that from a failed publish.
+		const { tools } = await (await connect()).listTools();
+
+		for (const name of ["publish_files", "publish_dir"]) {
+			const tool = tools.find((candidate) => candidate.name === name);
+			const folder = tool?.inputSchema.properties?.folder as { description?: string } | undefined;
+
+			expect(folder?.description, name).toContain("`site`");
+			expect(tool?.inputSchema.required ?? [], name).not.toContain("folder");
+		}
+	});
+
+	it("asks for nothing to list folders", async () => {
+		const { tools } = await (await connect()).listTools();
+		const listFolders = tools.find((tool) => tool.name === "list_folders");
+
+		expect(listFolders?.inputSchema.required ?? []).toEqual([]);
+	});
+
 	it("asks for nothing to list sites", async () => {
 		const { tools } = await (await connect()).listTools();
 		const listSites = tools.find((tool) => tool.name === "list_sites");
@@ -188,6 +211,19 @@ describe("what the tools answer with", () => {
 		const schemas = await outputSchemas();
 
 		expect(Object.keys((schemas.list_sites?.properties as object) ?? {})).toEqual(["sites"]);
+	});
+
+	it("describes a folder listing as fields, each with the path `folder` takes", async () => {
+		const schemas = await outputSchemas();
+		const folders = schemas.list_folders?.properties as
+			| { folders?: { items?: { properties?: object } } }
+			| undefined;
+
+		expect(Object.keys(schemas.list_folders?.properties as object)).toEqual(["folders"]);
+		expect(Object.keys(folders?.folders?.items?.properties ?? {}).sort()).toEqual([
+			"folderId",
+			"path",
+		]);
 	});
 
 	it("leaves the sign-in tools unstructured, having nothing to structure", async () => {
@@ -251,14 +287,16 @@ describe("what each tool admits it does", () => {
 		}
 	});
 
-	it("marks listing sites read-only, and leaves the write hints off it", async () => {
+	it("marks both listings read-only, and leaves the write hints off them", async () => {
 		// The spec gives `destructiveHint` and `idempotentHint` meaning only when `readOnlyHint` is
 		// false. Present-but-safe-looking values here would read as a judgement that was never made.
 		const hints = await annotations();
 
-		expect(hints.list_sites?.readOnlyHint).toBe(true);
-		expect(hints.list_sites).not.toHaveProperty("destructiveHint");
-		expect(hints.list_sites).not.toHaveProperty("idempotentHint");
+		for (const name of ["list_sites", "list_folders"]) {
+			expect(hints[name]?.readOnlyHint, name).toBe(true);
+			expect(hints[name], name).not.toHaveProperty("destructiveHint");
+			expect(hints[name], name).not.toHaveProperty("idempotentHint");
+		}
 	});
 
 	it("marks deleting a site destructive, and not idempotent", async () => {

@@ -19,10 +19,13 @@ export {
 	createSite,
 	deleteSite,
 	findSite,
+	listFolders,
 	listSites,
 	listTokens,
 	type PromotedDeploy,
 	promoteDeploy,
+	resolveFolder,
+	type SiteFolder,
 	type SiteSummary,
 } from "./api.js";
 export {
@@ -64,6 +67,7 @@ export {
 } from "./project.js";
 export {
 	type AuthoredFile,
+	type NewSite,
 	type PublishResult,
 	publish,
 	publishDirectory,
