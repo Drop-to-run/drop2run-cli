@@ -505,12 +505,20 @@ export function createServer(): McpServer {
 			title: "List sites",
 			description: "Lists the sites on this account, so a publish can go to one of them.",
 			inputSchema: {},
-			outputSchema: { sites: z.array(SITE_OUTPUT).describe("Every site on this account.") },
+			outputSchema: {
+				sites: z
+					.array(SITE_OUTPUT)
+					.describe("The account's sites, newest first — every one unless `total` is larger."),
+				total: z
+					.number()
+					.int()
+					.describe("How many sites the account holds. Larger than `sites` only past 100."),
+			},
 			annotations: READS_ONLY,
 		},
 		() =>
 			withCredentials(async (credentials) => {
-				const sites = await listSites(credentials);
+				const { sites, total } = await listSites(credentials);
 				// The empty case still carries the empty array. A tool that answers a sentence here and a
 				// structure everywhere else makes "no sites" the one branch a caller has to read English for.
 				const text =
@@ -520,9 +528,12 @@ export function createServer(): McpServer {
 								.map(
 									(site) => `${site.subdomain} — ${site.url}${site.name ? ` — ${site.name}` : ""}`,
 								)
-								.join("\n");
+								.join("\n") +
+							(total > sites.length
+								? `\n… and ${total - sites.length} more; these are the newest ${sites.length} of ${total}.`
+								: "");
 
-				return report(text, { sites: sites.map((site) => ({ ...site })) });
+				return report(text, { sites: sites.map((site) => ({ ...site })), total });
 			}),
 	);
 

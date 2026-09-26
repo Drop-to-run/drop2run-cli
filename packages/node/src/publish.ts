@@ -5,7 +5,7 @@ import {
 	type ProgressEvent,
 	type ProgressListener,
 } from "@drop2run/core";
-import { createSite, listSites, resolveFolder, type SiteSummary } from "./api.js";
+import { createSite, lookUpSite, resolveFolder, type SiteSummary } from "./api.js";
 import type { Credentials } from "./config.js";
 import { directorySource } from "./source.js";
 
@@ -97,11 +97,7 @@ async function resolveSite(
 		return await createSite(credentials, subdomain, folderId);
 	}
 
-	const wanted = site.trim().toLowerCase();
-	const found = (await listSites(credentials)).find(
-		(candidate) =>
-			candidate.siteId.toLowerCase() === wanted || candidate.subdomain.toLowerCase() === wanted,
-	);
+	const found = await lookUpSite(credentials, site);
 
 	if (found === undefined) {
 		// Named without naming a tool: the same sentence reaches a chat calling `list_sites` and a person

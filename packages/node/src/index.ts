@@ -22,10 +22,12 @@ export {
 	listFolders,
 	listSites,
 	listTokens,
+	lookUpSite,
 	type PromotedDeploy,
 	promoteDeploy,
 	resolveFolder,
 	type SiteFolder,
+	type SiteListing,
 	type SiteSummary,
 } from "./api.js";
 export {

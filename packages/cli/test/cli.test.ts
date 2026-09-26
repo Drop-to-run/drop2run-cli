@@ -107,7 +107,8 @@ describe("rm", () => {
 			vi.fn(async (input: string | URL, init?: RequestInit) => {
 				seen.push(`${init?.method ?? "GET"} ${String(input)}`);
 
-				return String(input).endsWith("/sites")
+				// By path, because the lookup now searches (`/sites?q=…`) rather than reading the bare listing.
+				return new URL(String(input)).pathname === "/api/sites"
 					? Response.json({
 							sites: [
 								{
@@ -292,6 +293,43 @@ describe("ls", () => {
 		);
 
 		expect((await run(["ls"])).text).toBe("alpha\thttps://alpha.dropto.live\tAlpha");
+	});
+
+	it("asks for the whole listing in one request, not the API's default page of 25", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const urls: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL) => {
+				urls.push(String(input));
+
+				return Response.json({ sites: [], total: 0 });
+			}),
+		);
+
+		await run(["ls"]);
+
+		expect(urls).toEqual(["https://dropto.run/api/sites?pageSize=100"]);
+	});
+
+	it("says how many it left out past the ceiling, rather than passing a short list off as all", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				Response.json({
+					sites: [
+						{ siteId: "01J", subdomain: "alpha", url: "https://alpha.dropto.live", name: null },
+					],
+					total: 101,
+				}),
+			),
+		);
+
+		const result = await run(["ls"]);
+
+		expect(result.text.split("\n").at(-1)).toContain("100 more");
+		expect(result.code).toBe(0);
 	});
 
 	it("says there are none rather than printing an empty answer", async () => {

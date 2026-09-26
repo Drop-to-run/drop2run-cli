@@ -304,7 +304,12 @@ export async function whoami(): Promise<CommandResult> {
 }
 
 /**
- * Lists the account's sites.
+ * Lists the account's sites, in one request.
+ *
+ * <b>One request, and it says when that was not all of them.</b> The API pages its listing and allows
+ * at most 100 a page; an account holds a handful, so a loop over pages would be machinery for a case
+ * that does not happen. If it does, the last line says how many were left out rather than letting a
+ * short list pass for the whole one — the defect this replaced was exactly that, at 25.
  *
  * @returns The result.
  */
@@ -312,20 +317,28 @@ export async function list(): Promise<CommandResult> {
 	const found = credentialsOr();
 	if ("result" in found) return found.result;
 
-	const sites = await listSites(found.credentials);
+	const { sites, total } = await listSites(found.credentials);
 	if (sites.length === 0) {
 		return {
 			text: "No sites yet. `drop2run deploy` publishes one.",
-			json: { sites: [] },
+			json: { sites: [], total: 0 },
 			code: 0,
 		};
 	}
 
+	const lines = sites.map(
+		(site) => `${site.subdomain}\t${site.url}${site.name ? `\t${site.name}` : ""}`,
+	);
+	if (total > sites.length) {
+		lines.push(
+			`… and ${(total - sites.length).toLocaleString()} more — this lists the newest ` +
+				`${sites.length.toLocaleString()} of ${total.toLocaleString()}.`,
+		);
+	}
+
 	return {
-		text: sites
-			.map((site) => `${site.subdomain}\t${site.url}${site.name ? `\t${site.name}` : ""}`)
-			.join("\n"),
-		json: { sites },
+		text: lines.join("\n"),
+		json: { sites, total },
 		code: 0,
 	};
 }

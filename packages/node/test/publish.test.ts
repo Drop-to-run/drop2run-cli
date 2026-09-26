@@ -56,8 +56,35 @@ function stubApi(sites: unknown[] = [], folders: unknown[] = []): Recorded[] {
 				body: typeof init?.body === "string" ? init.body : null,
 			});
 
-			if (url.endsWith("/api/sites") && (init?.method ?? "GET") === "GET") {
-				return Response.json({ sites });
+			const { pathname, searchParams } = new URL(url);
+			const method = init?.method ?? "GET";
+
+			if (pathname === "/api/sites" && method === "GET") {
+				// Searched the way the server searches — a substring of the subdomain or the name — so a
+				// lookup that forgot to pick the exact match out of the results would be caught here.
+				const q = searchParams.get("q")?.toLowerCase();
+				const listed = (sites as { subdomain: string; name: string | null }[]).filter(
+					(site) =>
+						q === undefined ||
+						site.subdomain.toLowerCase().includes(q) ||
+						(site.name ?? "").toLowerCase().includes(q),
+				);
+
+				// Paged the way the server pages: 25 unless asked for more, 100 at most. Without this the stub
+				// answered every site to a bare `GET /sites`, which is how a lookup that only ever read the
+				// first page passed here while failing for every account past 25 sites.
+				const size = Math.min(Number(searchParams.get("pageSize") ?? 25) || 25, 100);
+
+				return Response.json({ sites: listed.slice(0, size), total: listed.length });
+			}
+
+			const byId = /^\/api\/sites\/([^/]+)$/.exec(pathname);
+			if (byId !== null && method === "GET") {
+				const found = (sites as { siteId: string }[]).find((site) => site.siteId === byId[1]);
+
+				return found === undefined
+					? Response.json({ detail: "Not found" }, { status: 404 })
+					: Response.json(found);
 			}
 
 			if (url.endsWith("/api/site-folders")) {
@@ -116,7 +143,7 @@ describe("publishing with no site named", () => {
 	it("creates a new site rather than reusing the last one", async () => {
 		const seen = stubApi([
 			{
-				siteId: "01JOLDSITE0000000000000",
+				siteId: "01JOLDSITE0000000000000000",
 				subdomain: "old-site",
 				url: "https://old-site.dropto.live",
 				name: null,
@@ -144,7 +171,7 @@ describe("publishing to a named site", () => {
 	it("finds it by subdomain", async () => {
 		stubApi([
 			{
-				siteId: "01JOLDSITE0000000000000",
+				siteId: "01JOLDSITE0000000000000000",
 				subdomain: "old-site",
 				url: "https://old-site.dropto.live",
 				name: null,
@@ -152,22 +179,78 @@ describe("publishing to a named site", () => {
 		]);
 
 		expect((await publishFiles(credentials, [page], "old-site")).siteId).toBe(
-			"01JOLDSITE0000000000000",
+			"01JOLDSITE0000000000000000",
 		);
 	});
 
 	it("finds it by site id", async () => {
 		stubApi([
 			{
-				siteId: "01JOLDSITE0000000000000",
+				siteId: "01JOLDSITE0000000000000000",
 				subdomain: "old-site",
 				url: "https://old-site.dropto.live",
 				name: null,
 			},
 		]);
 
-		expect((await publishFiles(credentials, [page], "01JOLDSITE0000000000000")).siteId).toBe(
-			"01JOLDSITE0000000000000",
+		expect((await publishFiles(credentials, [page], "01JOLDSITE0000000000000000")).siteId).toBe(
+			"01JOLDSITE0000000000000000",
+		);
+	});
+
+	it("finds a site older than the newest 25, which a first page of the listing does not hold", async () => {
+		// The defect this pins: the listing became paged at 25, and the lookup kept reading only its
+		// first page, so an account's older sites answered "No site of yours is called" by subdomain.
+		const many = Array.from({ length: 30 }, (_, index) => ({
+			siteId: `01JSITE${String(index).padStart(19, "0")}`,
+			subdomain: `site-${index}`,
+			url: `https://site-${index}.dropto.live`,
+			name: null,
+		}));
+		stubApi(many);
+
+		expect((await publishFiles(credentials, [page], "site-29")).siteId).toBe(
+			"01JSITE0000000000000000029",
+		);
+	});
+
+	it("finds an older site by id too, which the listing's search does not read", async () => {
+		const many = Array.from({ length: 30 }, (_, index) => ({
+			siteId: `01JSITE${String(index).padStart(19, "0")}`,
+			subdomain: `site-${index}`,
+			url: `https://site-${index}.dropto.live`,
+			name: null,
+		}));
+		const seen = stubApi(many);
+
+		expect((await publishFiles(credentials, [page], "01jsite0000000000000000029")).subdomain).toBe(
+			"site-29",
+		);
+		expect(
+			seen.some((request) => request.url.endsWith("/api/sites/01JSITE0000000000000000029")),
+		).toBe(true);
+	});
+
+	it("picks the exact subdomain out of a search that matches several", async () => {
+		// The search is a substring match, so asking for "docs" also brings back "docs-old". Taking the
+		// first result would publish over whichever of the two is newer.
+		stubApi([
+			{
+				siteId: "01JDOCSOLD0000000000000000",
+				subdomain: "docs-old",
+				url: "https://docs-old.dropto.live",
+				name: null,
+			},
+			{
+				siteId: "01JDOCS0000000000000000000",
+				subdomain: "docs",
+				url: "https://docs.dropto.live",
+				name: null,
+			},
+		]);
+
+		expect((await publishFiles(credentials, [page], "docs")).siteId).toBe(
+			"01JDOCS0000000000000000000",
 		);
 	});
 

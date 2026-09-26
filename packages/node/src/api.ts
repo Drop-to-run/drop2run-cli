@@ -61,17 +61,70 @@ async function call<T>(credentials: Credentials, path: string, init: RequestInit
  * @throws Error naming what was not found, when nothing matches.
  */
 export async function findSite(credentials: Credentials, site: string): Promise<SiteSummary> {
-	const wanted = site.trim().toLowerCase();
-	const found = (await listSites(credentials)).find(
-		(candidate) =>
-			candidate.siteId.toLowerCase() === wanted || candidate.subdomain.toLowerCase() === wanted,
-	);
+	const found = await lookUpSite(credentials, site);
 
 	if (found === undefined) {
 		throw new Error(`No site of yours is called "${site}". \`drop2run ls\` shows what exists.`);
 	}
 
 	return found;
+}
+
+/**
+ * Something shaped like a site id: 26 letters and digits.
+ *
+ * Looser than Crockford base32 on purpose. This only decides whether a second request is worth making,
+ * and the server answers 404 for anything that is not one of the caller's sites — so a stricter check
+ * here could only turn away an id the server would have found.
+ */
+const SITE_ID_SHAPE = /^[0-9a-z]{26}$/i;
+
+/**
+ * Looks one of the caller's sites up by subdomain or id, or answers undefined.
+ *
+ * <b>Asked of the server, not searched for in a listing.</b> This used to read `GET /sites` and look
+ * through the result, which stopped being every site when the listing became paged (`f0c30de2`): the
+ * default page is 25, so a site older than the newest 25 answered "No site of yours is called" while it
+ * plainly existed. A subdomain goes through the listing's own search, which matches it as a substring,
+ * and the exact match is picked out of what comes back. An id is not something that search reads, so an
+ * id goes to `GET /sites/{id}`, which answers 404 for a site that is not the caller's or is deleted.
+ *
+ * @param credentials Token and base URL.
+ * @param site Subdomain or site id, in any case.
+ * @returns The site, or undefined when the caller has none by that name or id.
+ * @throws Error carrying the API's wording for any failure other than "not found".
+ */
+export async function lookUpSite(
+	credentials: Credentials,
+	site: string,
+): Promise<SiteSummary | undefined> {
+	const wanted = site.trim().toLowerCase();
+	if (wanted === "") return undefined;
+
+	const { sites } = await call<{ sites: SiteSummary[] }>(
+		credentials,
+		`sites?pageSize=${SITES_PER_REQUEST}&q=${encodeURIComponent(wanted)}`,
+	);
+	const bySubdomain = sites.find((candidate) => candidate.subdomain.toLowerCase() === wanted);
+
+	if (bySubdomain !== undefined) return bySubdomain;
+	if (!SITE_ID_SHAPE.test(wanted)) return undefined;
+
+	const response = await fetch(
+		`${credentials.apiBaseUrl}/sites/${encodeURIComponent(wanted.toUpperCase())}`,
+		{ headers: { Authorization: `Bearer ${credentials.token}` } },
+	);
+
+	if (response.status === 404) return undefined;
+	if (!response.ok) {
+		const problem = (await response.json().catch(() => null)) as { detail?: string } | null;
+
+		throw new Error(problem?.detail ?? `The API answered ${response.status}.`);
+	}
+
+	const detail = (await response.json()) as SiteSummary;
+
+	return { siteId: detail.siteId, subdomain: detail.subdomain, url: detail.url, name: detail.name };
 }
 
 /**
@@ -166,15 +219,35 @@ export async function listTokens(credentials: Credentials): Promise<AccessToken[
 }
 
 /**
- * Lists the account's sites.
+ * How many sites one request asks for: the ceiling `ListSites.MaxPageSize` allows.
+ *
+ * One request rather than a loop over pages, because the accounts this serves hold a handful of sites
+ * and a listing in a terminal is not worth a round trip per 100. What an account past it gets is not a
+ * silent cut: {@link SiteListing.total} says how many there are, and `ls` says it showed fewer.
+ */
+const SITES_PER_REQUEST = 100;
+
+/** The account's sites, and how many it holds in total. */
+export interface SiteListing {
+	/** The newest sites, at most {@link SITES_PER_REQUEST} of them. */
+	readonly sites: SiteSummary[];
+	/** How many sites the account holds, which exceeds `sites.length` only past the ceiling. */
+	readonly total: number;
+}
+
+/**
+ * Lists the account's sites in one request.
  *
  * @param credentials Token and base URL.
- * @returns The sites, newest first as the API orders them.
+ * @returns The sites, newest first as the API orders them, with the account's total.
  */
-export async function listSites(credentials: Credentials): Promise<SiteSummary[]> {
-	const body = await call<{ sites: SiteSummary[] }>(credentials, "sites");
+export async function listSites(credentials: Credentials): Promise<SiteListing> {
+	const body = await call<{ sites: SiteSummary[]; total: number }>(
+		credentials,
+		`sites?pageSize=${SITES_PER_REQUEST}`,
+	);
 
-	return body.sites;
+	return { sites: body.sites, total: body.total };
 }
 
 /**

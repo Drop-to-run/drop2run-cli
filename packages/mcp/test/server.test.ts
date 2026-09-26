@@ -207,10 +207,15 @@ describe("what the tools answer with", () => {
 		}
 	});
 
-	it("describes a site listing as fields", async () => {
+	it("describes a site listing as fields, with the total that says whether it is all of them", async () => {
+		// `total` rides beside the sites because the listing is one request of at most 100: a structured
+		// caller that only had the array could not tell "these are all" from "these are the newest 100".
 		const schemas = await outputSchemas();
 
-		expect(Object.keys((schemas.list_sites?.properties as object) ?? {})).toEqual(["sites"]);
+		expect(Object.keys((schemas.list_sites?.properties as object) ?? {}).sort()).toEqual([
+			"sites",
+			"total",
+		]);
 	});
 
 	it("describes a folder listing as fields, each with the path `folder` takes", async () => {
