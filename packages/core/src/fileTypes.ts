@@ -605,7 +605,7 @@ export const READER_EXTENSIONS: readonly string[] = extensionsWhere((type) => ty
 /**
  * Extensions the dashboard's editor opens as text.
  *
- * ⚠️ Mirrored by `EditableExtensions` in `apps/api`, which enforces it. The asymmetry is the danger
+ * ⚠️ Mirrored by `GetDeployFile._editableExtensions` in `apps/api`, which enforces it. The asymmetry is the danger
  * here: a text type missing from the list is an editor declining to open something it could have,
  * while a binary type wrongly present is a file rendered as mojibake into a textarea that can publish
  * it back — which destroys it.
