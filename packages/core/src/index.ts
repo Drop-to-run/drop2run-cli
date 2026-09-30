@@ -10,6 +10,7 @@ export {
 	CLAIM_TOKEN_HEADER,
 	type CompleteResponse,
 	completeDeploy,
+	DEFAULT_REQUEST_TIMEOUT_MS,
 	type PrepareResponse,
 	prepareDeploy,
 } from "./api.js";
@@ -38,8 +39,8 @@ export {
 	MOBILE_WARNING_BYTES,
 	type PlanLimits,
 	renameOfLoneHtmlPage,
-	shouldWarnAboutSize,
 	type SizedFile,
+	shouldWarnAboutSize,
 	sizeRefusal,
 	totalBytes,
 } from "./limits.js";
@@ -57,6 +58,7 @@ export {
 	type CollectedFile,
 	DeployError,
 	type DroppedFile,
+	describeError,
 	type ManifestFile,
 	type ProgressEvent,
 	type ProgressListener,

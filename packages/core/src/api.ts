@@ -1,4 +1,4 @@
-import { DeployError, type ManifestFile } from "./types.js";
+import { ClientErrorCode, DeployError, describeError, type ManifestFile } from "./types.js";
 import type { UploadTarget } from "./upload.js";
 
 /**
@@ -109,7 +109,36 @@ export interface ApiOptions {
 	readonly accountId?: string;
 	/** Overridable for tests. Defaults to the global `fetch`. */
 	readonly fetch?: typeof fetch;
+	/**
+	 * How long one call may go without an answer before it is abandoned, in milliseconds. Defaults to
+	 * {@link DEFAULT_REQUEST_TIMEOUT_MS}.
+	 */
+	readonly timeoutMs?: number;
+	/** Waits between retries of `complete`. Overridable for tests; defaults to a real timer. */
+	readonly delay?: (ms: number) => Promise<void>;
 }
+
+/**
+ * How long a control-plane call may go without an answer by default.
+ *
+ * <b>Why there is one at all.</b> Without it a request the network lost stays pending for ever: in the
+ * 30 September stress runs one client in a hundred sat after prepare with its `complete` unanswered,
+ * and the run waited on it until somebody pressed Ctrl-C. The server never saw that request, so no
+ * server-side timeout could have ended it.
+ *
+ * <b>Why two minutes.</b> `complete` verifies every file against the bucket and copies the ones reused
+ * from the live deploy, so on a large site it is honestly slow; this has to sit well above that, and
+ * only below "for ever".
+ */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+
+/**
+ * Waits before each retry of `complete`, so three attempts in all.
+ *
+ * Short, because the failure being retried is a lost connection rather than an overloaded server —
+ * an overloaded server answers, and an answer is never retried.
+ */
+const COMPLETE_RETRY_DELAYS_MS = [1_000, 4_000] as const;
 
 /**
  * Asks the API to validate a manifest and hand back upload URLs.
@@ -186,7 +215,7 @@ function absolute(uploadUrl: string, baseUrl: string | undefined): string {
  *   server stores it only for a site that has none yet, so a later deploy never overwrites a name its
  *   owner typed — see `suggestSiteName`.
  * @returns The live deploy and the site's URL.
- * @throws DeployError When verification fails.
+ * @throws DeployError When verification fails, or when every attempt went unanswered.
  */
 export async function completeDeploy(
 	siteId: string,
@@ -195,15 +224,45 @@ export async function completeDeploy(
 	signal?: AbortSignal,
 	name?: string | null,
 ): Promise<CompleteResponse> {
-	return request<CompleteResponse>(
-		`sites/${encodeURIComponent(siteId)}/deploys/${encodeURIComponent(deployId)}/complete`,
-		// A bodyless POST when there is no name to send, which is what this call has always been. The
-		// server treats an absent body and an absent field identically, so nothing depends on which of
-		// the two a client picks.
-		name === null || name === undefined ? undefined : { name },
-		options,
-		signal,
-	);
+	const path = `sites/${encodeURIComponent(siteId)}/deploys/${encodeURIComponent(deployId)}/complete`;
+	// A bodyless POST when there is no name to send, which is what this call has always been. The server
+	// treats an absent body and an absent field identically, so nothing depends on which of the two a
+	// client picks.
+	const body = name === null || name === undefined ? undefined : { name };
+	const delay = options.delay ?? wait;
+
+	/*
+	 * Retried when it went unanswered, and only then.
+	 *
+	 * Safe because the endpoint is idempotent (I9): a deploy already live on its site is answered with
+	 * the same success, and a second call arriving while the first is still verifying waits on the
+	 * site's lock and then takes that same branch. So whether the lost attempt never reached the server
+	 * or reached it and lost only its reply, calling again ends in the one live deploy.
+	 *
+	 * An HTTP error is never retried: it is the server's answer, and asking again gets it again. Nor is
+	 * `prepare`, which creates a deploy each time it is called.
+	 */
+	for (let attempt = 0; ; attempt++) {
+		try {
+			return await request<CompleteResponse>(path, body, options, signal);
+		} catch (error) {
+			const unanswered =
+				error instanceof DeployError && error.code === ClientErrorCode.NetworkFailed;
+			if (!unanswered || attempt >= COMPLETE_RETRY_DELAYS_MS.length || signal?.aborted) throw error;
+
+			await delay(COMPLETE_RETRY_DELAYS_MS[attempt] ?? 1_000);
+			signal?.throwIfAborted();
+		}
+	}
+}
+
+/**
+ * Waits, for real.
+ *
+ * @param ms Milliseconds to wait.
+ */
+function wait(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -215,7 +274,8 @@ export async function completeDeploy(
  * @param options API access options.
  * @param signal Cancels the request.
  * @returns The parsed response.
- * @throws DeployError Carrying the API's RFC 9457 `type` as its code, so the UI can branch on it.
+ * @throws DeployError Carrying the API's RFC 9457 `type` as its code, so the UI can branch on it, or
+ *   {@link ClientErrorCode.NetworkFailed} when no answer arrived within {@link ApiOptions.timeoutMs}.
  */
 async function request<T>(
 	path: string,
@@ -225,6 +285,7 @@ async function request<T>(
 ): Promise<T> {
 	const doFetch = options.fetch ?? globalFetch();
 	const base = options.baseUrl ?? "/api";
+	const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
 
 	const headers: Record<string, string> = {};
 	if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -232,16 +293,60 @@ async function request<T>(
 	if (options.token) headers.Authorization = `Bearer ${options.token}`;
 	if (options.accountId) headers[ACCOUNT_HEADER] = options.accountId;
 
-	const response = await doFetch(`${base}/${path}`, {
-		method: "POST",
-		headers,
-		...(body === undefined ? {} : { body: JSON.stringify(body) }),
-		...(signal ? { signal } : {}),
-	});
+	/*
+	 * One controller for both ways a call can end early, built by hand rather than with
+	 * `AbortSignal.timeout` and `AbortSignal.any`. The first raises a `TimeoutError`, which `isAbort`
+	 * reads as the user cancelling — a timeout would have been reported as "Deploy cancelled." — and the
+	 * second is missing from browsers this dashboard still serves. The flag is what tells the two apart.
+	 */
+	const controller = new AbortController();
+	let timedOut = false;
+	const timer = setTimeout(() => {
+		timedOut = true;
+		controller.abort();
+	}, timeoutMs);
+	const forwardCancel = () => controller.abort();
+	if (signal?.aborted) controller.abort();
+	signal?.addEventListener("abort", forwardCancel, { once: true });
 
-	if (!response.ok) throw await problemToError(response);
+	try {
+		const response = await doFetch(`${base}/${path}`, {
+			method: "POST",
+			headers,
+			...(body === undefined ? {} : { body: JSON.stringify(body) }),
+			signal: controller.signal,
+		});
 
-	return (await response.json()) as T;
+		if (!response.ok) throw await problemToError(response);
+
+		return (await response.json()) as T;
+	} catch (error) {
+		// The caller's own cancel goes up unchanged, so it is still reported as a cancel.
+		if (error instanceof DeployError || signal?.aborted) throw error;
+
+		if (timedOut) {
+			throw new DeployError(
+				ClientErrorCode.NetworkFailed,
+				`The server did not answer within ${Math.round(timeoutMs / 1000)} seconds.`,
+				{ path, cause: describeError(error) },
+			);
+		}
+
+		// What `fetch` throws for a connection that failed before any response: a TypeError, in Node and
+		// in every browser. Anything else — a body that is not JSON, say — is not a lost connection and
+		// must not be mistaken for one, because that is the signal `complete` retries on.
+		if (error instanceof TypeError) {
+			throw new DeployError(ClientErrorCode.NetworkFailed, "Could not reach the server.", {
+				path,
+				cause: describeError(error),
+			});
+		}
+
+		throw error;
+	} finally {
+		clearTimeout(timer);
+		signal?.removeEventListener("abort", forwardCancel);
+	}
 }
 
 /**
@@ -279,8 +384,7 @@ async function problemToError(response: Response): Promise<DeployError> {
 		);
 	}
 
-	const code =
-		typeof problem.type === "string" ? problem.type : `http_${response.status}`;
+	const code = typeof problem.type === "string" ? problem.type : `http_${response.status}`;
 	const message =
 		typeof problem.detail === "string"
 			? problem.detail

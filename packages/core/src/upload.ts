@@ -1,4 +1,4 @@
-import { ClientErrorCode, DeployError, type ManifestFile } from "./types.js";
+import { ClientErrorCode, DeployError, describeError, type ManifestFile } from "./types.js";
 
 /**
  * Uploads files to the upload Worker, which streams them to R2 from the nearest edge.
@@ -118,10 +118,7 @@ export async function uploadAll(
 		}
 	};
 
-	const workers = Array.from(
-		{ length: Math.min(concurrency, targets.length) },
-		worker,
-	);
+	const workers = Array.from({ length: Math.min(concurrency, targets.length) }, worker);
 
 	try {
 		await Promise.all(workers);
@@ -179,11 +176,7 @@ async function uploadOne(
 			// A forged or expired permit will not start working, and neither will a deploy that has
 			// already used every upload it was authorised for. Stop rather than spending three retries
 			// on an answer that cannot change.
-			if (
-				response.status === 401 ||
-				response.status === 403 ||
-				response.status === 429
-			) {
+			if (response.status === 401 || response.status === 403 || response.status === 429) {
 				throw new DeployError(
 					ClientErrorCode.UploadFailed,
 					`Upload of ${target.path} was refused. The upload window may have expired — try deploying again.`,
@@ -203,7 +196,7 @@ async function uploadOne(
 	throw new DeployError(
 		ClientErrorCode.UploadFailed,
 		`Could not upload ${target.path} after ${context.retries + 1} attempts.`,
-		{ path: target.path, cause: String(lastError) },
+		{ path: target.path, cause: describeError(lastError) },
 	);
 }
 
@@ -236,10 +229,7 @@ function defaultDelay(ms: number): Promise<void> {
  * @returns True for an abort.
  */
 export function isAbort(error: unknown): boolean {
-	return (
-		error instanceof Error &&
-		(error.name === "AbortError" || error.name === "TimeoutError")
-	);
+	return error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError");
 }
 
 /** Builds the error used when the user cancels. */

@@ -119,8 +119,43 @@ export const ClientErrorCode = {
 	Cancelled: "cancelled",
 	/** An upload kept failing after every retry. */
 	UploadFailed: "upload_failed",
+	/**
+	 * A control-plane call got no answer: the connection failed before a response arrived, or the
+	 * request timeout passed. Distinct from an HTTP error, which is an answer — this one says nothing
+	 * about whether the server acted, which is why only an idempotent call may retry on it.
+	 */
+	NetworkFailed: "network_failed",
 } as const;
 
+/**
+ * Describes a thrown value together with its chain of causes, as one line.
+ *
+ * Node's `fetch` reports every connection failure as `TypeError: fetch failed` and keeps the reason —
+ * `other side closed`, `ECONNRESET` — in `cause`. Serialized as it is, that error is `{}`, and a stress
+ * run's only failure once read `"detail": {}`: the one question it raised was the one it could not
+ * answer. Each link's `code` is kept because it is the part worth searching for.
+ *
+ * @param error Whatever was caught.
+ * @returns The messages from the outermost error inwards, e.g. `fetch failed ← other side closed (UND_ERR_SOCKET)`.
+ */
+export function describeError(error: unknown): string {
+	const parts: string[] = [];
+	let current: unknown = error;
+
+	// Bounded, because a cause chain is only a convention and nothing stops one from pointing at itself.
+	for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth++) {
+		if (current instanceof Error) {
+			const code = (current as { code?: unknown }).code;
+			parts.push(typeof code === "string" ? `${current.message} (${code})` : current.message);
+			current = (current as { cause?: unknown }).cause;
+		} else {
+			parts.push(String(current));
+			break;
+		}
+	}
+
+	return parts.join(" ← ");
+}
+
 /** One of the {@link ClientErrorCode} values. */
-export type ClientErrorCode =
-	(typeof ClientErrorCode)[keyof typeof ClientErrorCode];
+export type ClientErrorCode = (typeof ClientErrorCode)[keyof typeof ClientErrorCode];
