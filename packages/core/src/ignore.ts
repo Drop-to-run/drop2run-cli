@@ -21,6 +21,10 @@ const IGNORED_EXACT = new Set([".DS_Store", "Thumbs.db", "desktop.ini", ".gitign
  * configuration that happens to live in the folder somebody publishes, and none of it belongs on a
  * website. It was found the way the others must have been — a publish from a project folder carried
  * `.claude/launch.json` up with the site.
+ *
+ * The other agents' directories are here for the same reason, and before anybody found one in a site:
+ * the docs tell people to install the skill file into `.agents/skills/`, which is the shared path
+ * Codex, Cursor, Gemini CLI and VS Code read, so a project root now carries one by instruction.
  */
 const IGNORED_DIRECTORIES = [
 	"__MACOSX",
@@ -31,6 +35,10 @@ const IGNORED_DIRECTORIES = [
 	".idea",
 	".vscode",
 	".claude",
+	".agents",
+	".cursor",
+	".codex",
+	".gemini",
 ];
 
 /**

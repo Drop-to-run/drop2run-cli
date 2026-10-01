@@ -1,6 +1,6 @@
 # @drop2run/mcp
 
-An MCP server that lets Claude — or any MCP client — publish what it made to
+An MCP server that lets any MCP client — Claude, Cursor, VS Code, Codex, Gemini CLI — publish what it made to
 [Drop2Run](https://dropto.run): an HTML page, a markdown note, a folder of documents or a built site. It
 returns a live HTTPS URL.
 
@@ -35,11 +35,29 @@ add this to `claude_desktop_config.json` and restart the app:
 That file is at `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, and
 `%APPDATA%\Claude\claude_desktop_config.json` on Windows.
 
+**Cursor** — the same `mcpServers` block with `"type": "stdio"` added, in `~/.cursor/mcp.json` (or `.cursor/mcp.json` for one
+project). **Gemini CLI** — the same block, in `~/.gemini/settings.json`.
+
+**VS Code** — one command:
+
+```bash
+code --add-mcp '{"name":"drop2run","command":"npx","args":["-y","@drop2run/mcp"]}'
+```
+
+**Codex** — one command:
+
+```bash
+codex mcp add drop2run -- npx -y @drop2run/mcp
+```
+
+Zed and the rest: [dropto.run/docs/agents](https://dropto.run/docs/agents) has the file and the shape
+for each client.
+
 Nothing is installed globally either way — `npx` fetches the package when the client starts it.
 
 ## Sign in
 
-Ask for a publish. If there is no token yet, Claude calls the `login` tool, a browser tab opens, you
+Ask for a publish. If there is no token yet, the agent calls the `login` tool, a browser tab opens, you
 approve the sign-in, and the publish carries on. Nothing to install, nothing to paste.
 
 The token lands in `~/.config/drop2run/config.json` with mode `0600` — the same file the `drop2run`
