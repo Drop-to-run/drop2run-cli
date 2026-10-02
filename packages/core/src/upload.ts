@@ -376,6 +376,18 @@ async function uploadOne(
 				);
 			}
 
+			// The edge refuses a body over the zone's ceiling before the Worker sees it. Nothing a retry
+			// sends will be smaller, so four attempts were four full uploads of a file that could never land.
+			// Only a client that can read the status gets here: the edge's 413 carries no CORS headers, so a
+			// browser sees a network error instead — see docs/briefs/LARGE-FILES-BRIEF.md.
+			if (status === 413) {
+				throw new DeployError(
+					ClientErrorCode.UploadFailed,
+					`${target.path} is too large to upload in one request. Make it smaller, or leave it out of this publish.`,
+					{ path: target.path, status },
+				);
+			}
+
 			lastError = new Error(`HTTP ${status}`);
 		} catch (error) {
 			if (error instanceof DeployError) throw error;
