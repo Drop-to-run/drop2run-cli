@@ -68,6 +68,11 @@ export {
 	asDeployError,
 	cancelled,
 	isAbort,
+	type PutRequest,
+	type PutTransport,
+	type RetryListener,
+	StalledError,
 	type UploadTarget,
 	uploadAll,
+	xhrTransport,
 } from "./upload.js";

@@ -9,6 +9,12 @@
 
 /** Progress reported to the caller as a deploy moves through its stages. */
 export type ProgressEvent =
+	/**
+	 * The source is reading what was dropped. Sent once with zeros the moment a deploy starts, so a
+	 * caller is never left showing nothing while a large zip is read and expanded, and then as the
+	 * source reports bytes. `total` is 0 while the size is not known yet.
+	 */
+	| { type: "reading"; bytes: number; total: number }
 	| { type: "collecting"; files: number }
 	| { type: "hashing"; done: number; total: number }
 	| { type: "preparing" }
@@ -16,7 +22,14 @@ export type ProgressEvent =
 			type: "uploading";
 			done: number;
 			total: number;
+			/**
+			 * Bytes sent so far, including the part of each file still in flight where the transport can
+			 * see it. Can step back when a stalled upload is restarted, because the bytes of the abandoned
+			 * attempt no longer count.
+			 */
 			bytes: number;
+			/** Bytes this deploy has to send: the files the server asked for, not the ones it reused. */
+			totalBytes: number;
 			reused: number;
 			/**
 			 * Path of the file that just landed, where the reporter knows it. Uploads run several at a
@@ -26,6 +39,20 @@ export type ProgressEvent =
 			 * Optional because a caller that only draws a bar has no use for it.
 			 */
 			path?: string;
+	  }
+	/**
+	 * One file's upload failed or stalled and is being tried again. Not a stage of its own: the deploy
+	 * is still uploading, and this exists so a caller can say why the numbers stopped moving.
+	 */
+	| {
+			type: "retrying";
+			path: string;
+			/** The attempt about to start, counting the first as 1. */
+			attempt: number;
+			/** Every attempt this file will get, the first included. */
+			attempts: number;
+			/** Whether the last attempt stopped sending rather than failing outright. */
+			stalled: boolean;
 	  }
 	| { type: "completing"; reused: number }
 	/**
@@ -119,6 +146,12 @@ export const ClientErrorCode = {
 	Cancelled: "cancelled",
 	/** An upload kept failing after every retry. */
 	UploadFailed: "upload_failed",
+	/**
+	 * The browser could not hold what was dropped in memory. Raised when allocating the buffer for a
+	 * large zip or file fails, which a browser reports as a `RangeError` rather than as anything that
+	 * names memory.
+	 */
+	OutOfMemory: "out_of_memory",
 	/**
 	 * A control-plane call got no answer: the connection failed before a response arrived, or the
 	 * request timeout passed. Distinct from an HTTP error, which is an answer — this one says nothing

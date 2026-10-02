@@ -85,6 +85,12 @@ export function shortenPath(path: string, width: number): string {
  */
 export function describe(event: ProgressEvent, width = 80): string | null {
 	switch (event.type) {
+		case "reading":
+			return event.total > 0
+				? `Reading ${formatBytes(event.bytes)}/${formatBytes(event.total)}`
+				: "Reading files";
+		case "retrying":
+			return `${event.stalled ? "Upload stalled" : "Upload failed"}, retrying ${shortenPath(event.path, Math.max(12, width - 40))} (attempt ${event.attempt}/${event.attempts})`;
 		case "collecting":
 			return `Collected ${event.files.toLocaleString()} ${event.files === 1 ? "file" : "files"}`;
 		case "hashing":

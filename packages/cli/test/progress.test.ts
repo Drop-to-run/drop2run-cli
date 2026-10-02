@@ -16,7 +16,7 @@ import { describe, formatBytes, progressWriter, shortenPath } from "../src/progr
 
 /** An `uploading` event, with the parts a test cares about filled in. */
 function uploading(over: Partial<Extract<ProgressEvent, { type: "uploading" }>>): ProgressEvent {
-	return { type: "uploading", done: 1, total: 10, bytes: 1024, reused: 0, ...over };
+	return { type: "uploading", done: 1, total: 10, bytes: 1024, totalBytes: 0, reused: 0, ...over };
 }
 
 group("describe", () => {

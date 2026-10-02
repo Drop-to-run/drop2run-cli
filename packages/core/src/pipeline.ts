@@ -25,9 +25,15 @@ import { asDeployError, type UploadDeps, uploadAll } from "./upload.js";
  * {@link ProgressListener} like every other failure rather than escaping past it.
  *
  * @param signal Aborts reading.
+ * @param onRead Told how many bytes have been read out of how many, for a source that can say. A zip
+ * or a folder of large files can take a while to read, and this is the only sign of life the caller
+ * has until the source returns.
  * @returns The files to publish, already named.
  */
-export type DeploySource = (signal?: AbortSignal) => Promise<readonly CollectedFile[]>;
+export type DeploySource = (
+	signal?: AbortSignal,
+	onRead?: (bytes: number, total: number) => void,
+) => Promise<readonly CollectedFile[]>;
 
 /** Everything the caller can vary, separate from the four documented arguments. */
 export interface DeployOptions extends ApiOptions {
@@ -61,7 +67,14 @@ export async function deploy(
 	options: DeployOptions = {},
 ): Promise<void> {
 	try {
-		const collected = await source(signal);
+		// Before anything is read, so a caller has a running deploy to show from the first instant.
+		// Reading a 200 MB zip and expanding it took long enough that the drop zone, which had nothing
+		// to render until `collecting`, fell back to its resting state and looked as though the drop
+		// had been ignored.
+		onProgress({ type: "reading", bytes: 0, total: 0 });
+		const collected = await source(signal, (bytes, total) =>
+			onProgress({ type: "reading", bytes, total }),
+		);
 		onProgress({ type: "collecting", files: collected.length });
 
 		/*
@@ -109,6 +122,13 @@ export async function deploy(
 		// Progress is reported against the whole deploy, not against the upload list. A redeploy that
 		// changed three files out of five hundred uploads three, and "3 of 3 files" would read as though
 		// the other 497 had been lost — so the files the server is reusing are counted as already done.
+		// Bytes are the other way round: only what is actually sent, because that is what takes the time.
+		const sizes = new Map(hashed.map((file) => [file.path, file.bytes.length]));
+		const totalBytes = prepared.upload.reduce(
+			(sum, target) => sum + (sizes.get(target.path) ?? 0),
+			0,
+		);
+
 		await uploadAll(
 			prepared.upload,
 			prepared.uploadUrl,
@@ -119,11 +139,14 @@ export async function deploy(
 					done: prepared.reused + done,
 					total: prepared.total,
 					bytes,
+					totalBytes,
 					reused: prepared.reused,
-					path,
+					...(path === undefined ? {} : { path }),
 				}),
 			signal,
 			options.upload,
+			(path, attempt, attempts, stalled) =>
+				onProgress({ type: "retrying", path, attempt, attempts, stalled }),
 		);
 
 		onProgress({ type: "completing", reused: prepared.reused });

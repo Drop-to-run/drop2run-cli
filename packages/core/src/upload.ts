@@ -20,6 +20,61 @@ const DEFAULT_RETRIES = 3;
 /** Backoff before each retry, in milliseconds. */
 const BACKOFF_MS = [1000, 2000, 4000];
 
+/**
+ * How long an upload may go without sending a byte, or without an answer once everything is sent,
+ * before it is abandoned and retried.
+ *
+ * A connection that dies quietly — a laptop changing networks, a captive portal, a proxy that drops
+ * the socket without a reset — leaves a request open with nothing moving through it. Without a limit
+ * that request never settles, so the deploy never fails and never finishes: the state somebody
+ * dropping a 200 MB zip described as "stuck, no idea whether it worked". Thirty seconds is long enough
+ * that a slow but live connection always shows progress inside it, since the browser reports sent
+ * bytes many times a second.
+ */
+const DEFAULT_STALL_MS = 30_000;
+
+/**
+ * Shortest gap between two byte-progress reports.
+ *
+ * The browser reports sent bytes for every chunk, from up to eight uploads at once. Forwarding each
+ * one would be thousands of `postMessage` calls and React renders a second for a number nobody can
+ * read that fast. A file finishing is always reported at once, whatever this says.
+ */
+const PROGRESS_INTERVAL_MS = 200;
+
+/**
+ * Sends one upload and resolves with the HTTP status.
+ *
+ * Separate from {@link UploadDeps.fetch} because `fetch` cannot report upload progress: its body is
+ * opaque until the response arrives, so a 50 MB file is invisible for as long as it takes to send.
+ */
+export type PutTransport = (request: PutRequest) => Promise<number>;
+
+/** What a {@link PutTransport} is asked to send. */
+export interface PutRequest {
+	/** The upload endpoint. */
+	readonly url: string;
+	/** The permit, sent as a bearer token. */
+	readonly token: string;
+	/** The file's bytes. */
+	readonly body: Uint8Array;
+	/** Cancels the request. */
+	readonly signal: AbortSignal | undefined;
+	/** Called with how many bytes of the body have been sent, where the transport can tell. */
+	readonly onSent: (bytes: number) => void;
+	/** Idle time after which the transport gives up with a {@link StalledError}. */
+	readonly stallMs: number;
+}
+
+/** Raised by a transport whose request stopped moving for longer than the stall limit. */
+export class StalledError extends Error {
+	/** @param seconds How long nothing moved. */
+	constructor(seconds: number) {
+		super(`No data moved for ${seconds}s.`);
+		this.name = "StalledError";
+	}
+}
+
 /** One file's upload permit, as returned by the prepare endpoint. */
 export interface UploadTarget {
 	/** Normalized path, matching the manifest entry. */
@@ -51,38 +106,92 @@ export interface UploadDeps {
 	readonly concurrency?: number;
 	/** How many times one file is retried. */
 	readonly retries?: number;
+	/**
+	 * Sends one request. Defaults to `XMLHttpRequest` where one exists — a browser page or Worker —
+	 * because it is the only browser API that reports upload progress, and to {@link fetch} elsewhere.
+	 * Passing `fetch` without `put` selects the fetch transport, which is what every test written
+	 * before this option relies on.
+	 */
+	readonly put?: PutTransport;
+	/** Idle limit before an upload is retried. See {@link DEFAULT_STALL_MS}. */
+	readonly stallMs?: number;
+	/** Clock for throttling progress reports. Defaults to `Date.now`. */
+	readonly now?: () => number;
 }
 
 /**
- * Uploads every file, reporting progress as each one lands.
+ * Receives one file's retry, before the backoff that precedes it.
+ *
+ * @param path The file being retried.
+ * @param attempt The attempt about to start, counting the first as 1.
+ * @param attempts Every attempt the file gets.
+ * @param stalled Whether the previous attempt stalled rather than failed.
+ */
+export type RetryListener = (
+	path: string,
+	attempt: number,
+	attempts: number,
+	stalled: boolean,
+) => void;
+
+/**
+ * Uploads every file, reporting progress as each one lands and, where the transport can see it, as
+ * bytes leave.
  *
  * @param targets Upload permits from the prepare endpoint.
  * @param uploadUrl The one endpoint every permit is presented to, also from the prepare endpoint.
  * @param files The hashed manifest, used to find the bytes for each target.
- * @param onProgress Called after each successful upload with counts, cumulative bytes, and the path
- * that just landed.
+ * @param onProgress Called after each successful upload with counts, bytes sent, and the path that just
+ * landed; and, no more often than every {@link PROGRESS_INTERVAL_MS}, while files are in flight, with
+ * no path. `bytes` counts the in-flight part of each file, so it moves during a large upload.
  * @param signal Cancels in-flight and queued uploads.
  * @param deps Overrides for testing.
+ * @param onRetry Told before a file is tried again, so a caller can say why the numbers paused.
  * @throws DeployError When a file still fails after every retry, or when cancelled.
  */
 export async function uploadAll(
 	targets: readonly UploadTarget[],
 	uploadUrl: string,
 	files: readonly ManifestFile[],
-	onProgress?: (done: number, total: number, bytes: number, path: string) => void,
+	onProgress?: (done: number, total: number, bytes: number, path?: string) => void,
 	signal?: AbortSignal,
 	deps: UploadDeps = {},
+	onRetry?: RetryListener,
 ): Promise<void> {
-	const doFetch = deps.fetch ?? globalFetch();
+	const put = deps.put ?? defaultTransport(deps.fetch);
 	const delay = deps.delay ?? defaultDelay;
 	const concurrency = deps.concurrency ?? DEFAULT_CONCURRENCY;
 	const retries = deps.retries ?? DEFAULT_RETRIES;
+	const stallMs = deps.stallMs ?? DEFAULT_STALL_MS;
+	const now = deps.now ?? Date.now;
 
 	const byPath = new Map(files.map((file) => [file.path, file]));
 
 	let nextIndex = 0;
 	let done = 0;
-	let uploadedBytes = 0;
+	// Bytes of files that have landed, plus — separately, because an attempt can be abandoned and its
+	// bytes then stop counting — what each upload still in flight has sent so far.
+	let landedBytes = 0;
+	const inFlight = new Map<number, number>();
+	let lastReport = Number.NEGATIVE_INFINITY;
+
+	/**
+	 * Reports the current totals. A file landing always reports; byte movement is throttled.
+	 *
+	 * @param path The file that just landed, or undefined for a byte-progress report.
+	 */
+	const report = (path?: string): void => {
+		if (onProgress === undefined) return;
+
+		const at = now();
+		if (path === undefined && at - lastReport < PROGRESS_INTERVAL_MS) return;
+		lastReport = at;
+
+		let bytes = landedBytes;
+		for (const sent of inFlight.values()) bytes += sent;
+
+		onProgress(done, targets.length, bytes, path);
+	};
 
 	/** Takes targets off the shared queue until it is empty. */
 	const worker = async (): Promise<void> => {
@@ -105,16 +214,27 @@ export async function uploadAll(
 			}
 
 			await uploadOne(target, file, {
-				doFetch,
+				put,
 				delay,
 				retries,
 				signal,
 				uploadUrl,
+				stallMs,
+				onSent: (sent) => {
+					inFlight.set(index, sent);
+					report();
+				},
+				onRetry: (attempt, stalled) => {
+					// The abandoned attempt's bytes are not on the server, so they stop counting.
+					inFlight.set(index, 0);
+					onRetry?.(target.path, attempt, retries + 1, stalled);
+				},
 			});
 
+			inFlight.delete(index);
 			done += 1;
-			uploadedBytes += file.bytes.length;
-			onProgress?.(done, targets.length, uploadedBytes, file.path);
+			landedBytes += file.bytes.length;
+			report(file.path);
 		}
 	};
 
@@ -133,20 +253,23 @@ export async function uploadAll(
  *
  * @param target Where to PUT it.
  * @param file The file to send.
- * @param context Resolved dependencies and the cancellation signal.
+ * @param context Resolved dependencies, the cancellation signal, and the two listeners.
  * @throws DeployError When every attempt failed.
  */
 async function uploadOne(
 	target: UploadTarget,
 	file: ManifestFile,
 	context: {
-		doFetch: typeof fetch;
+		put: PutTransport;
 		delay: (ms: number) => Promise<void>;
 		retries: number;
 		// Explicitly `| undefined` rather than optional: exactOptionalPropertyTypes distinguishes an
 		// absent property from one set to undefined, and the caller always passes the key.
 		signal: AbortSignal | undefined;
 		uploadUrl: string;
+		stallMs: number;
+		onSent: (bytes: number) => void;
+		onRetry: (attempt: number, stalled: boolean) => void;
 	},
 ): Promise<void> {
 	let lastError: unknown;
@@ -155,36 +278,36 @@ async function uploadOne(
 		context.signal?.throwIfAborted();
 
 		if (attempt > 0) {
+			context.onRetry(attempt + 1, lastError instanceof StalledError);
 			// Last entry repeats if retries were configured higher than the backoff table.
 			await context.delay(BACKOFF_MS[attempt - 1] ?? BACKOFF_MS.at(-1) ?? 1000);
 			context.signal?.throwIfAborted();
 		}
 
 		try {
-			const response = await context.doFetch(context.uploadUrl, {
-				method: "PUT",
-				body: new Blob([file.bytes.slice().buffer]),
-				// The permit is the whole request. `Content-Length` is required by the Worker and cannot
-				// be set here — it is a forbidden header name — but the browser derives it from the body,
-				// which is exactly the length the token names.
-				headers: { Authorization: `Bearer ${target.token}` },
-				...(context.signal ? { signal: context.signal } : {}),
+			const status = await context.put({
+				url: context.uploadUrl,
+				token: target.token,
+				body: file.bytes,
+				signal: context.signal,
+				onSent: context.onSent,
+				stallMs: context.stallMs,
 			});
 
-			if (response.ok) return;
+			if (status >= 200 && status < 300) return;
 
 			// A forged or expired permit will not start working, and neither will a deploy that has
 			// already used every upload it was authorised for. Stop rather than spending three retries
 			// on an answer that cannot change.
-			if (response.status === 401 || response.status === 403 || response.status === 429) {
+			if (status === 401 || status === 403 || status === 429) {
 				throw new DeployError(
 					ClientErrorCode.UploadFailed,
 					`Upload of ${target.path} was refused. The upload window may have expired — try deploying again.`,
-					{ path: target.path, status: response.status },
+					{ path: target.path, status },
 				);
 			}
 
-			lastError = new Error(`HTTP ${response.status}`);
+			lastError = new Error(`HTTP ${status}`);
 		} catch (error) {
 			if (error instanceof DeployError) throw error;
 			if (isAbort(error)) throw cancelled();
@@ -193,11 +316,162 @@ async function uploadOne(
 		}
 	}
 
-	throw new DeployError(
-		ClientErrorCode.UploadFailed,
-		`Could not upload ${target.path} after ${context.retries + 1} attempts.`,
-		{ path: target.path, cause: describeError(lastError) },
-	);
+	// A connection that went quiet is worth naming as such: "could not upload" reads as a problem
+	// with the file, when the thing to check is the network.
+	const message =
+		lastError instanceof StalledError
+			? `Upload of ${target.path} stopped moving and did not recover after ${context.retries + 1} attempts. Check your connection and try again.`
+			: `Could not upload ${target.path} after ${context.retries + 1} attempts.`;
+
+	throw new DeployError(ClientErrorCode.UploadFailed, message, {
+		path: target.path,
+		cause: describeError(lastError),
+	});
+}
+
+/**
+ * Picks the transport when the caller did not.
+ *
+ * @param doFetch A `fetch` the caller supplied, which selects the fetch transport.
+ * @returns XHR where the runtime has it and no `fetch` was supplied, otherwise fetch.
+ */
+function defaultTransport(doFetch: typeof fetch | undefined): PutTransport {
+	if (doFetch !== undefined) return fetchTransport(doFetch);
+
+	const Xhr = (globalThis as { XMLHttpRequest?: XhrConstructor }).XMLHttpRequest;
+
+	return Xhr === undefined ? fetchTransport(globalFetch()) : xhrTransport(Xhr);
+}
+
+/**
+ * Sends with `fetch`, which reports nothing until the response arrives.
+ *
+ * No stall limit here, and that is deliberate rather than an omission: with no sent-byte events there
+ * is no telling a slow upload from a dead one, and any fixed limit would abandon a large file on a slow
+ * line that was working. The CLI uses this, where a hung request is a terminal somebody can interrupt.
+ *
+ * @param doFetch The fetch to call.
+ * @returns The transport.
+ */
+function fetchTransport(doFetch: typeof fetch): PutTransport {
+	return async ({ url, token, body, signal }) => {
+		const response = await doFetch(url, {
+			method: "PUT",
+			body: new Blob([body.slice().buffer]),
+			// The permit is the whole request. `Content-Length` is required by the Worker and cannot be
+			// set here — it is a forbidden header name — but the runtime derives it from the body, which
+			// is exactly the length the token names.
+			headers: { Authorization: `Bearer ${token}` },
+			...(signal ? { signal } : {}),
+		});
+
+		return response.status;
+	};
+}
+
+/** The part of `XMLHttpRequest` the transport uses, declared here because the CLI builds without DOM types. */
+interface XhrLike {
+	/** HTTP status once loaded. */
+	readonly status: number;
+	/** Progress of the request body. */
+	readonly upload: { onprogress: ((event: { loaded: number }) => void) | null };
+	/** Fires as the response arrives. */
+	onprogress: (() => void) | null;
+	/** Fires once the response is complete. */
+	onload: (() => void) | null;
+	/** Fires on a network failure. */
+	onerror: (() => void) | null;
+	/** Starts a request. */
+	open(method: string, url: string): void;
+	/** Sets one request header. */
+	setRequestHeader(name: string, value: string): void;
+	/** Sends the body. */
+	send(body: Uint8Array): void;
+	/** Cancels the request. */
+	abort(): void;
+}
+
+/** Constructor of {@link XhrLike}. */
+type XhrConstructor = new () => XhrLike;
+
+/**
+ * Sends with `XMLHttpRequest`, reporting sent bytes and abandoning a request that stops moving.
+ *
+ * The idle timer restarts on every sent-byte event and on every response chunk, so it measures silence
+ * rather than duration: a large file on a slow line never trips it while bytes are still leaving.
+ *
+ * @param Xhr The runtime's `XMLHttpRequest`.
+ * @returns The transport.
+ */
+export function xhrTransport(Xhr: XhrConstructor): PutTransport {
+	return ({ url, token, body, signal, onSent, stallMs }) =>
+		new Promise<number>((resolve, reject) => {
+			const xhr = new Xhr();
+			let settled = false;
+			let timer: ReturnType<typeof setTimeout> | undefined;
+
+			/** Settles once, releasing the timer and the abort listener. */
+			const settle = (finish: () => void): void => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				signal?.removeEventListener("abort", onAbort);
+				finish();
+			};
+
+			/** Restarts the idle timer. */
+			const arm = (): void => {
+				clearTimeout(timer);
+				timer = setTimeout(() => {
+					xhr.abort();
+					settle(() => reject(new StalledError(Math.round(stallMs / 1000))));
+				}, stallMs);
+			};
+
+			/** Cancels on the caller's signal. */
+			function onAbort(): void {
+				xhr.abort();
+				settle(() => reject(abortReason(signal)));
+			}
+
+			if (signal?.aborted) {
+				reject(abortReason(signal));
+				return;
+			}
+
+			signal?.addEventListener("abort", onAbort, { once: true });
+
+			xhr.open("PUT", url);
+			// Same permit, same reason as the fetch transport: the browser sets Content-Length itself.
+			xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+			xhr.upload.onprogress = (event) => {
+				arm();
+				onSent(event.loaded);
+			};
+			xhr.onprogress = arm;
+			xhr.onload = () => settle(() => resolve(xhr.status));
+			xhr.onerror = () => settle(() => reject(new TypeError("Network error during upload.")));
+
+			arm();
+			// The view itself, not a copy: XHR sends exactly the bytes a view covers.
+			xhr.send(body);
+		});
+}
+
+/**
+ * What an aborted signal was aborted with, as an error {@link isAbort} recognises.
+ *
+ * @param signal The aborted signal.
+ * @returns The signal's reason when it is an error, otherwise a fresh AbortError.
+ */
+function abortReason(signal: AbortSignal | undefined): Error {
+	const reason: unknown = signal?.reason;
+	if (reason instanceof Error) return reason;
+
+	const error = new Error("Aborted.");
+	error.name = "AbortError";
+
+	return error;
 }
 
 /**
