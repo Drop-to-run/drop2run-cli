@@ -14,6 +14,17 @@ import { ClientErrorCode, DeployError, describeError, type ManifestFile } from "
 /** How many uploads run at once. */
 const DEFAULT_CONCURRENCY = 8;
 
+/**
+ * Most bytes in flight at once, across every upload in the pool.
+ *
+ * Eight at a time is right for a site of small pages and wrong for a drop of large files: eight 50 MB
+ * uploads is 400 MB the browser holds in request buffers on top of the files themselves, which is
+ * where a phone tab dies. With this, small files still go eight at a time and large ones go one or two
+ * at a time. A file larger than the whole budget still goes, on its own — refusing it would fail a
+ * deploy the plan allows.
+ */
+const DEFAULT_BYTES_IN_FLIGHT = 64 * 1024 * 1024;
+
 /** How many times one file is retried before the deploy fails. */
 const DEFAULT_RETRIES = 3;
 
@@ -104,6 +115,8 @@ export interface UploadDeps {
 	readonly delay?: (ms: number) => Promise<void>;
 	/** How many uploads run at once. */
 	readonly concurrency?: number;
+	/** Most bytes in flight at once. See {@link DEFAULT_BYTES_IN_FLIGHT}. */
+	readonly maxBytesInFlight?: number;
 	/** How many times one file is retried. */
 	readonly retries?: number;
 	/**
@@ -164,11 +177,43 @@ export async function uploadAll(
 	const retries = deps.retries ?? DEFAULT_RETRIES;
 	const stallMs = deps.stallMs ?? DEFAULT_STALL_MS;
 	const now = deps.now ?? Date.now;
+	const maxBytesInFlight = deps.maxBytesInFlight ?? DEFAULT_BYTES_IN_FLIGHT;
 
 	const byPath = new Map(files.map((file) => [file.path, file]));
 
 	let nextIndex = 0;
 	let done = 0;
+	// Set by the first upload to fail for good. The deploy is lost at that point, so the rest of the
+	// pool stops taking new files rather than spending minutes uploading what can never be published.
+	let failed = false;
+
+	// The byte budget: what uploads in flight have reserved, and the workers waiting for room.
+	let reserved = 0;
+	let waiting: Array<() => void> = [];
+
+	/**
+	 * Waits until a file of this size fits the budget, then reserves it.
+	 *
+	 * @param size Bytes the upload will hold.
+	 */
+	const acquire = async (size: number): Promise<void> => {
+		while (reserved > 0 && reserved + size > maxBytesInFlight) {
+			await new Promise<void>((resolve) => waiting.push(resolve));
+		}
+		reserved += size;
+	};
+
+	/**
+	 * Returns a reservation and wakes every waiter to try again.
+	 *
+	 * @param size Bytes that were reserved.
+	 */
+	const release = (size: number): void => {
+		reserved -= size;
+		const woken = waiting;
+		waiting = [];
+		for (const wake of woken) wake();
+	};
 	// Bytes of files that have landed, plus — separately, because an attempt can be abandoned and its
 	// bytes then stop counting — what each upload still in flight has sent so far.
 	let landedBytes = 0;
@@ -196,6 +241,8 @@ export async function uploadAll(
 	/** Takes targets off the shared queue until it is empty. */
 	const worker = async (): Promise<void> => {
 		for (;;) {
+			if (failed) return;
+
 			// Reading and incrementing without a lock is safe: JavaScript runs one task at a time, so no
 			// two workers can observe the same index.
 			const index = nextIndex++;
@@ -206,6 +253,7 @@ export async function uploadAll(
 
 			const file = byPath.get(target.path);
 			if (file === undefined) {
+				failed = true;
 				throw new DeployError(
 					ClientErrorCode.UploadFailed,
 					`The server asked for ${target.path}, which is not in the manifest.`,
@@ -213,27 +261,41 @@ export async function uploadAll(
 				);
 			}
 
-			await uploadOne(target, file, {
-				put,
-				delay,
-				retries,
-				signal,
-				uploadUrl,
-				stallMs,
-				onSent: (sent) => {
-					inFlight.set(index, sent);
-					report();
-				},
-				onRetry: (attempt, stalled) => {
-					// The abandoned attempt's bytes are not on the server, so they stop counting.
-					inFlight.set(index, 0);
-					onRetry?.(target.path, attempt, retries + 1, stalled);
-				},
-			});
+			const size = file.bytes.length;
+			await acquire(size);
+
+			try {
+				// Checked again after the wait: the deploy may have failed or been cancelled meanwhile.
+				if (failed) return;
+				signal?.throwIfAborted();
+
+				await uploadOne(target, file, {
+					put,
+					delay,
+					retries,
+					signal,
+					uploadUrl,
+					stallMs,
+					onSent: (sent) => {
+						inFlight.set(index, sent);
+						report();
+					},
+					onRetry: (attempt, stalled) => {
+						// The abandoned attempt's bytes are not on the server, so they stop counting.
+						inFlight.set(index, 0);
+						onRetry?.(target.path, attempt, retries + 1, stalled);
+					},
+				});
+			} catch (error) {
+				failed = true;
+				throw error;
+			} finally {
+				release(size);
+			}
 
 			inFlight.delete(index);
 			done += 1;
-			landedBytes += file.bytes.length;
+			landedBytes += size;
 			report(file.path);
 		}
 	};
@@ -357,7 +419,11 @@ function fetchTransport(doFetch: typeof fetch): PutTransport {
 	return async ({ url, token, body, signal }) => {
 		const response = await doFetch(url, {
 			method: "PUT",
-			body: new Blob([body.slice().buffer]),
+			// The view, not a copy. Wrapping it in `new Blob([body.slice().buffer])` made two extra
+			// full-size copies of every file in flight — eight at once, so up to 400 MB on a drop of
+			// 50 MB files. `fetch` sends exactly the range a view covers. The cast is TypeScript's
+			// SharedArrayBuffer distinction again; see `sha256Hex`.
+			body: body as Uint8Array<ArrayBuffer>,
 			// The permit is the whole request. `Content-Length` is required by the Worker and cannot be
 			// set here — it is a forbidden header name — but the runtime derives it from the body, which
 			// is exactly the length the token names.

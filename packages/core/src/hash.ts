@@ -12,9 +12,12 @@ import type { CollectedFile, ManifestFile } from "./types.js";
  * @returns Lowercase hex digest, 64 characters.
  */
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
-	// Copied into a fresh buffer: a Uint8Array may be a view onto a larger ArrayBuffer, and passing the
-	// view's buffer directly would hash the whole thing.
-	const digest = await crypto.subtle.digest("SHA-256", bytes.slice().buffer);
+	// The view itself, not `bytes.buffer`: a Uint8Array may be a view onto a larger ArrayBuffer, and the
+	// buffer would hash the whole thing. Web Crypto reads exactly the range a view covers, so no copy is
+	// needed — the copy this used to take was a second full-size buffer per file, held for no reason.
+	// The cast is about TypeScript only: `BufferSource` excludes views onto a SharedArrayBuffer, which
+	// nothing here produces.
+	const digest = await crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>);
 
 	return [...new Uint8Array(digest)]
 		.map((byte) => byte.toString(16).padStart(2, "0"))
