@@ -1,8 +1,8 @@
 import { type ApiOptions, completeDeploy, prepareDeploy } from "./api.js";
 import { hashAll } from "./hash.js";
 import { checkLimits, type PlanLimits, renameOfLoneHtmlPage } from "./limits.js";
-import { suggestSiteName } from "./title.js";
-import type { CollectedFile, ProgressListener } from "./types.js";
+import { readSiteName } from "./title.js";
+import { type CollectedFile, type ProgressListener, sizeOf } from "./types.js";
 import { asDeployError, type UploadDeps, uploadAll } from "./upload.js";
 
 /**
@@ -123,7 +123,7 @@ export async function deploy(
 		// changed three files out of five hundred uploads three, and "3 of 3 files" would read as though
 		// the other 497 had been lost — so the files the server is reusing are counted as already done.
 		// Bytes are the other way round: only what is actually sent, because that is what takes the time.
-		const sizes = new Map(hashed.map((file) => [file.path, file.bytes.length]));
+		const sizes = new Map(hashed.map((file) => [file.path, sizeOf(file.bytes)]));
 		const totalBytes = prepared.upload.reduce(
 			(sum, target) => sum + (sizes.get(target.path) ?? 0),
 			0,
@@ -159,7 +159,7 @@ export async function deploy(
 			prepared.deployId,
 			options,
 			signal,
-			suggestSiteName(files),
+			await readSiteName(files),
 		);
 
 		onProgress({ type: "done", url: completed.url, name: completed.name });

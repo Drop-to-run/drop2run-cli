@@ -56,10 +56,33 @@ export function suggestSiteName(
 	files: readonly CollectedFile[],
 ): string | null {
 	const index = files.find((file) => file.path === "index.html");
-	if (index === undefined) return null;
+	// A page still on disk cannot be read synchronously; {@link readSiteName} reads it first.
+	if (index === undefined || !ArrayBuffer.isView(index.bytes)) return null;
 
 	try {
-		return nameFromHtml(decodeHead(index.bytes));
+		return nameFromHtml(decodeHead(index.bytes as Uint8Array));
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * {@link suggestSiteName} for a drop whose `index.html` may still be on disk.
+ *
+ * Reads only the head the name is taken from, not the whole page, and turns a read failure into "no
+ * name" for the same reason a parse failure is: a name is a nicety and must never fail a deploy.
+ *
+ * @param files The collected files.
+ * @returns The suggested name, or null when the drop offers none.
+ */
+export async function readSiteName(files: readonly CollectedFile[]): Promise<string | null> {
+	const index = files.find((file) => file.path === "index.html");
+	if (index === undefined) return null;
+	if (ArrayBuffer.isView(index.bytes)) return suggestSiteName(files);
+
+	try {
+		const head = new Uint8Array(await index.bytes.slice(0, HEAD_BYTES).arrayBuffer());
+		return suggestSiteName([{ path: index.path, bytes: head }]);
 	} catch {
 		return null;
 	}

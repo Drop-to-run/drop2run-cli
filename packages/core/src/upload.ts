@@ -1,4 +1,11 @@
-import { ClientErrorCode, DeployError, describeError, type ManifestFile } from "./types.js";
+import {
+	ClientErrorCode,
+	DeployError,
+	describeError,
+	type FileContent,
+	type ManifestFile,
+	sizeOf,
+} from "./types.js";
 
 /**
  * Uploads files to the upload Worker, which streams them to R2 from the nearest edge.
@@ -67,8 +74,8 @@ export interface PutRequest {
 	readonly url: string;
 	/** The permit, sent as a bearer token. */
 	readonly token: string;
-	/** The file's bytes. */
-	readonly body: Uint8Array;
+	/** The file's contents: in memory, or a `Blob` the runtime streams from disk as it sends. */
+	readonly body: FileContent;
 	/** Cancels the request. */
 	readonly signal: AbortSignal | undefined;
 	/** Called with how many bytes of the body have been sent, where the transport can tell. */
@@ -261,7 +268,7 @@ export async function uploadAll(
 				);
 			}
 
-			const size = file.bytes.length;
+			const size = sizeOf(file.bytes);
 			await acquire(size);
 
 			try {
@@ -422,8 +429,9 @@ function fetchTransport(doFetch: typeof fetch): PutTransport {
 			// The view, not a copy. Wrapping it in `new Blob([body.slice().buffer])` made two extra
 			// full-size copies of every file in flight — eight at once, so up to 400 MB on a drop of
 			// 50 MB files. `fetch` sends exactly the range a view covers. The cast is TypeScript's
-			// SharedArrayBuffer distinction again; see `sha256Hex`.
-			body: body as Uint8Array<ArrayBuffer>,
+			// SharedArrayBuffer distinction again; see `sha256Hex`. A `Blob` goes as it is, and the runtime
+			// streams it from disk.
+			body: body as Uint8Array<ArrayBuffer> | Blob,
 			// The permit is the whole request. `Content-Length` is required by the Worker and cannot be
 			// set here — it is a forbidden header name — but the runtime derives it from the body, which
 			// is exactly the length the token names.
@@ -452,7 +460,7 @@ interface XhrLike {
 	/** Sets one request header. */
 	setRequestHeader(name: string, value: string): void;
 	/** Sends the body. */
-	send(body: Uint8Array): void;
+	send(body: FileContent): void;
 	/** Cancels the request. */
 	abort(): void;
 }
@@ -519,7 +527,8 @@ export function xhrTransport(Xhr: XhrConstructor): PutTransport {
 			xhr.onerror = () => settle(() => reject(new TypeError("Network error during upload.")));
 
 			arm();
-			// The view itself, not a copy: XHR sends exactly the bytes a view covers.
+			// The view itself, not a copy: XHR sends exactly the bytes a view covers. A `Blob` is read
+			// from disk as it goes.
 			xhr.send(body);
 		});
 }
@@ -578,6 +587,24 @@ export function cancelled(): DeployError {
 }
 
 /**
+ * The refusal for a browser that could not allocate the memory a drop needed.
+ *
+ * What a browser throws then is a `RangeError` — "Array buffer allocation failed" in Chrome, "invalid
+ * array length" or "out of memory" elsewhere — and none of those names the fix. One sentence for every
+ * place it can happen: reading a zip, expanding it, or hashing a large file.
+ *
+ * @param detail The browser's own message, kept for the log.
+ * @returns The refusal.
+ */
+export function outOfMemory(detail?: string): DeployError {
+	return new DeployError(
+		ClientErrorCode.OutOfMemory,
+		"This browser ran out of memory reading what you dropped. Drop the unzipped folder instead, or try again in a desktop browser with fewer tabs open.",
+		detail,
+	);
+}
+
+/**
  * Normalizes anything thrown during upload into a {@link DeployError}.
  *
  * @param error The thrown value.
@@ -586,6 +613,7 @@ export function cancelled(): DeployError {
 export function asDeployError(error: unknown): DeployError {
 	if (error instanceof DeployError) return error;
 	if (isAbort(error)) return cancelled();
+	if (error instanceof RangeError) return outOfMemory(error.message);
 
 	return new DeployError(
 		ClientErrorCode.UploadFailed,

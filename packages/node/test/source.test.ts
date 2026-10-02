@@ -49,7 +49,8 @@ describe("directorySource", () => {
 		const files = await directorySource(root)();
 
 		expect(files.map((file) => file.path)).toEqual(["index.html"]);
-		expect(new TextDecoder().decode(files[0]!.bytes)).toBe("<h1>hi</h1>");
+		// The disk source reads into memory, so the contents are bytes rather than a Blob.
+		expect(new TextDecoder().decode(files[0]!.bytes as Uint8Array)).toBe("<h1>hi</h1>");
 	});
 
 	it("uses forward slashes whatever the platform separator is", async () => {
@@ -94,9 +95,9 @@ describe("directorySource", () => {
 		const files = await directorySource(root)();
 
 		expect(files.map((file) => file.path)).toEqual(["index.html"]);
-		expect(files.some((file) => new TextDecoder().decode(file.bytes).includes("SECRET"))).toBe(
-			false,
-		);
+		expect(
+			files.some((file) => new TextDecoder().decode(file.bytes as Uint8Array).includes("SECRET")),
+		).toBe(false);
 	});
 
 	it("skips a symlinked directory pointing out of the folder", async () => {

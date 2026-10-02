@@ -1,4 +1,11 @@
-import type { CollectedFile, ManifestFile } from "./types.js";
+import {
+	bytesOf,
+	ClientErrorCode,
+	type CollectedFile,
+	DeployError,
+	describeError,
+	type ManifestFile,
+} from "./types.js";
 
 /**
  * Content hashing. The API rejects a manifest whose checksums are not lowercase hex SHA-256, and
@@ -28,12 +35,15 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
  * Hashes every collected file, reporting progress as it goes.
  *
  * Sequential on purpose: `crypto.subtle` is already native, and hashing in parallel on one thread only
- * adds scheduling overhead while making progress reporting jump around.
+ * adds scheduling overhead while making progress reporting jump around. It also bounds memory: a file
+ * still on disk is read here, hashed and let go, so only one is ever held — and the manifest keeps the
+ * on-disk handle, not the bytes, so the upload reads it again from disk.
  *
  * @param files Files to hash.
  * @param onProgress Called after each file with how many are done.
  * @param signal Aborts between files.
  * @returns The same files with their checksums attached.
+ * @throws DeployError When a file on disk can no longer be read.
  */
 export async function hashAll(
 	files: readonly CollectedFile[],
@@ -45,9 +55,36 @@ export async function hashAll(
 	for (const [index, file] of files.entries()) {
 		signal?.throwIfAborted();
 
-		hashed.push({ ...file, sha256: await sha256Hex(file.bytes) });
+		hashed.push({ ...file, sha256: await sha256Hex(await readForHash(file)) });
 		onProgress?.(index + 1, files.length);
 	}
 
 	return hashed;
+}
+
+/**
+ * Reads one file's bytes for hashing, naming the file when that fails.
+ *
+ * A file from a dropped folder is read for the first time here, so this is where one that was moved,
+ * renamed or deleted after the drop surfaces. The browser reports that as a `NotReadableError` that
+ * names no file, and an upload error built from it would send somebody looking at their network.
+ *
+ * @param file The file to read.
+ * @returns Its bytes.
+ * @throws DeployError When it cannot be read.
+ */
+async function readForHash(file: CollectedFile): Promise<Uint8Array> {
+	try {
+		return await bytesOf(file.bytes);
+	} catch (error) {
+		// Not a read failure: the browser could not allocate the buffer, and the pipeline has its own
+		// message for that.
+		if (error instanceof RangeError) throw error;
+
+		throw new DeployError(
+			ClientErrorCode.ReadFailed,
+			`Could not read ${file.path}. It may have been moved, renamed or changed since you dropped it — drop the folder again.`,
+			{ path: file.path, cause: describeError(error) },
+		);
+	}
 }

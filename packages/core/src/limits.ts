@@ -5,7 +5,13 @@ import {
 	VIEWABLE_EXTENSIONS as TABLE_VIEWABLE_EXTENSIONS,
 	WEB_ASSET_EXTENSIONS,
 } from "./fileTypes.js";
-import { ClientErrorCode, DeployError, type ManifestFile } from "./types.js";
+import {
+	ClientErrorCode,
+	DeployError,
+	type FileContent,
+	type ManifestFile,
+	sizeOf,
+} from "./types.js";
 
 /**
  * The pre-upload check.
@@ -242,7 +248,7 @@ export function checkLimits(files: readonly ManifestFile[], limits: PlanLimits |
 	}
 
 	const refusal = sizeRefusal(
-		files.map((file) => ({ path: file.path, size: file.bytes.length })),
+		files.map((file) => ({ path: file.path, size: sizeOf(file.bytes) })),
 		limits,
 	);
 
@@ -359,8 +365,8 @@ export function archiveRefusal(archive: SizedFile, limits: PlanLimits | null): D
  * @param files Files to measure.
  * @returns Total bytes.
  */
-export function totalBytes(files: readonly { bytes: Uint8Array }[]): number {
-	return files.reduce((sum, file) => sum + file.bytes.length, 0);
+export function totalBytes(files: readonly { bytes: FileContent }[]): number {
+	return files.reduce((sum, file) => sum + sizeOf(file.bytes), 0);
 }
 
 /**
@@ -369,6 +375,6 @@ export function totalBytes(files: readonly { bytes: Uint8Array }[]): number {
  * @param files Files to measure.
  * @returns True when a warning is warranted.
  */
-export function shouldWarnAboutSize(files: readonly { bytes: Uint8Array }[]): boolean {
+export function shouldWarnAboutSize(files: readonly { bytes: FileContent }[]): boolean {
 	return totalBytes(files) > MOBILE_WARNING_BYTES;
 }

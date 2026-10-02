@@ -85,12 +85,49 @@ export interface DroppedFile {
 	readonly file: File;
 }
 
+/**
+ * A file's contents: in memory, or a `Blob` still on disk.
+ *
+ * A file out of a zip has to be in memory — it only exists once decompressed. A file from a dropped
+ * folder does not: it is already on disk, and reading every one into memory before hashing was a
+ * folder's whole size held for the whole deploy. As a `Blob` it is read once to hash and then sent
+ * straight from disk, so a 250 MB folder costs about its largest file.
+ */
+export type FileContent = Uint8Array | Blob;
+
 /** One file gathered from a folder drop or a zip, before it has been hashed. */
 export interface CollectedFile {
 	/** Path relative to the drop root, always `/`-separated and never starting with `/`. */
 	readonly path: string;
-	/** File contents. */
-	readonly bytes: Uint8Array;
+	/**
+	 * File contents, in memory or on disk — see {@link FileContent}. Measure with {@link sizeOf} and read
+	 * with {@link bytesOf}, never `.length`, which a `Blob` does not have.
+	 */
+	readonly bytes: FileContent;
+}
+
+/**
+ * How many bytes a file's contents hold.
+ *
+ * @param content In memory or on disk.
+ * @returns The size in bytes.
+ */
+export function sizeOf(content: FileContent): number {
+	// `ArrayBuffer.isView` rather than `instanceof Uint8Array`: a test environment can hand over a typed
+	// array from another realm, and `instanceof` is false for every one of those.
+	return ArrayBuffer.isView(content) ? content.byteLength : content.size;
+}
+
+/**
+ * A file's contents as bytes, reading them if they are still on disk.
+ *
+ * @param content In memory or on disk.
+ * @returns The bytes. In-memory contents come back as they are, not copied.
+ */
+export async function bytesOf(content: FileContent): Promise<Uint8Array> {
+	return ArrayBuffer.isView(content)
+		? (content as Uint8Array)
+		: new Uint8Array(await content.arrayBuffer());
 }
 
 /** One file after hashing, in the shape the API's manifest expects. */
@@ -152,6 +189,11 @@ export const ClientErrorCode = {
 	 * names memory.
 	 */
 	OutOfMemory: "out_of_memory",
+	/**
+	 * A dropped file could not be read when it came to be hashed. Files from a folder stay on disk until
+	 * then, so one moved, deleted or changed after the drop fails here rather than at the drop.
+	 */
+	ReadFailed: "read_failed",
 	/**
 	 * A control-plane call got no answer: the connection failed before a response arrived, or the
 	 * request timeout passed. Distinct from an HTTP error, which is an answer — this one says nothing

@@ -1,4 +1,10 @@
-import { ClientErrorCode, DeployError, describeError, type ManifestFile } from "./types.js";
+import {
+	ClientErrorCode,
+	DeployError,
+	describeError,
+	type ManifestFile,
+	sizeOf,
+} from "./types.js";
 import type { UploadTarget } from "./upload.js";
 
 /**
@@ -160,7 +166,7 @@ export async function prepareDeploy(
 	const manifest = files.map((file) => ({
 		path: file.path,
 		sha256: file.sha256,
-		size: file.bytes.length,
+		size: sizeOf(file.bytes),
 	}));
 
 	const prepared = await request<PrepareResponse>(

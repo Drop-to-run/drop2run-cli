@@ -53,14 +53,17 @@ export {
 	type SummaryEntry,
 	summarise,
 } from "./summary.js";
-export { MAX_NAME_LENGTH, suggestSiteName } from "./title.js";
+export { MAX_NAME_LENGTH, readSiteName, suggestSiteName } from "./title.js";
 export {
+	bytesOf,
 	ClientErrorCode,
 	type CollectedFile,
 	DeployError,
 	type DroppedFile,
 	describeError,
+	type FileContent,
 	type ManifestFile,
+	sizeOf,
 	type ProgressEvent,
 	type ProgressListener,
 } from "./types.js";
@@ -68,6 +71,7 @@ export {
 	asDeployError,
 	cancelled,
 	isAbort,
+	outOfMemory,
 	type PutRequest,
 	type PutTransport,
 	type RetryListener,
