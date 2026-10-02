@@ -1,7 +1,7 @@
 import {
-	DOCUMENT_EXTENSIONS as TABLE_DOCUMENT_EXTENSIONS,
 	extensionOf,
 	GALLERY_EXTENSIONS,
+	DOCUMENT_EXTENSIONS as TABLE_DOCUMENT_EXTENSIONS,
 	VIEWABLE_EXTENSIONS as TABLE_VIEWABLE_EXTENSIONS,
 	WEB_ASSET_EXTENSIONS,
 } from "./fileTypes.js";
@@ -322,6 +322,35 @@ export function sizeRefusal(
 	}
 
 	return null;
+}
+
+/**
+ * What can be refused about a `.zip` before it is opened: its compressed size against the per-publish
+ * ceiling, and nothing else.
+ *
+ * Not {@link sizeRefusal} with the archive as a one-entry drop. That is what the confirmation screen
+ * used to do, and it weighed the whole archive against `maxFileBytes` — so a 200 MB zip of small pages,
+ * well inside a 250 MB-per-publish plan, was refused as "200 MB, and this plan allows 10 MB per file".
+ * The compressed size bounds what the archive expands to in total, never the size of any one entry in
+ * it. The per-file and file-count checks run once the entries exist: while the archive is expanded,
+ * and again in {@link checkLimits} on what came out.
+ *
+ * Shared by the confirmation screen and the zip reader, so the two cannot word or measure this
+ * differently.
+ *
+ * @param archive The archive's name and compressed size.
+ * @param limits Limits of the caller's plan, or null when they could not be loaded.
+ * @returns The refusal, or null when the archive may be opened.
+ */
+export function archiveRefusal(archive: SizedFile, limits: PlanLimits | null): DeployError | null {
+	// A tier with no per-publish ceiling has no figure to refuse against here; the server still does.
+	if (limits?.maxSiteBytes == null || archive.size <= limits.maxSiteBytes) return null;
+
+	return new DeployError(
+		ClientErrorCode.ZipTooLarge,
+		`${archive.path} is ${formatBytes(archive.size)} compressed, and this plan allows ${formatBytes(limits.maxSiteBytes)} per site.`,
+		{ limit: limits.maxSiteBytes, actual: archive.size },
+	);
 }
 
 /**

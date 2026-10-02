@@ -30,6 +30,7 @@ export {
 export { hashAll, sha256Hex } from "./hash.js";
 export { shouldIgnore } from "./ignore.js";
 export {
+	archiveRefusal,
 	canPublish,
 	checkLimits,
 	formatBytes,
