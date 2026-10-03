@@ -357,7 +357,7 @@ async function uploadOne(
 			const status = await context.put({
 				url: context.uploadUrl,
 				token: target.token,
-				body: file.bytes,
+				body: untyped(file.bytes),
 				signal: context.signal,
 				onSent: context.onSent,
 				stallMs: context.stallMs,
@@ -408,6 +408,27 @@ async function uploadOne(
 		path: target.path,
 		cause: describeError(lastError),
 	});
+}
+
+/**
+ * The contents as a body that carries no media type.
+ *
+ * ⚠️ A dropped `File` has one — `text/markdown`, `image/png` — and a browser sends a typed `Blob` body
+ * with that as its `Content-Type` header. The upload Worker allows exactly one request header,
+ * `Authorization`, so the preflight for every such upload was refused and the browser reported
+ * "Request header field content-type is not allowed by Access-Control-Allow-Headers". It shipped that
+ * way the moment folder files started going up as `File`s rather than as bytes, and failed every upload
+ * from a dropped folder in production. A slice with no type argument is the same bytes on disk with an
+ * empty type, so the browser sends no `Content-Type` and nothing is copied. The type was never wanted
+ * anyway: the router derives it from the extension when it serves the file (I10).
+ *
+ * @param content In memory or on disk.
+ * @returns Contents the runtime will send without a `Content-Type`.
+ */
+export function untyped(content: FileContent): FileContent {
+	if (ArrayBuffer.isView(content) || content.type === "") return content;
+
+	return content.slice(0, content.size);
 }
 
 /**
