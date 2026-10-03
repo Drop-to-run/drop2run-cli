@@ -129,6 +129,21 @@ export async function deploy(
 			0,
 		);
 
+		// Said before the first byte rather than when the first file lands. An upload whose first
+		// attempts all fail never lands a file, and the screen went on reading "Getting ready" under a
+		// line about retrying an upload — the stage named a step that had already finished. Only when
+		// there is something to send: a redeploy that reuses every file goes straight to completing.
+		if (prepared.upload.length > 0) {
+			onProgress({
+				type: "uploading",
+				done: prepared.reused,
+				total: prepared.total,
+				bytes: 0,
+				totalBytes,
+				reused: prepared.reused,
+			});
+		}
+
 		await uploadAll(
 			prepared.upload,
 			prepared.uploadUrl,
