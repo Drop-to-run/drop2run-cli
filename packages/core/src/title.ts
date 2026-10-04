@@ -142,8 +142,9 @@ function nameFromHtml(html: string): string | null {
  *
  * `DOMParser` is the right tool and a safe one: it builds a detached document, so no script in the
  * dropped page runs, no resource it references is fetched, and nothing it contains reaches the page
- * this code is running on. It is absent under node — where the pipeline's tests run, and where the
- * Phase 3 CLI will — hence the caller's regex fallback rather than a hard dependency on it.
+ * this code is running on. It is absent under node — where the CLI and the MCP server run — and in a
+ * Web Worker, which is where the dashboard runs the pipeline; hence the caller's regex fallback rather
+ * than a hard dependency on it, and the fallback is the path most drops actually take.
  *
  * @param html The document text.
  * @returns The parsed document, or null when the runtime cannot parse one.
@@ -220,7 +221,7 @@ function matchTag(html: string, tag: string): string | null {
 		html,
 	);
 
-	return match?.[1] ?? null;
+	return match?.[1] === undefined ? null : decodeEntities(match[1]);
 }
 
 /**
@@ -240,10 +241,95 @@ function matchOgSiteName(html: string): string | null {
 
 	for (const pattern of patterns) {
 		const match = pattern.exec(html);
-		if (match?.[1] !== undefined) return match[1];
+		if (match?.[1] !== undefined) return decodeEntities(match[1]);
 	}
 
 	return null;
+}
+
+/**
+ * Latin-1's named entities, in code-point order from U+00A0 (`nbsp`) to U+00FF (`yuml`).
+ *
+ * A list rather than a map because the order is the code point: the entity at index `i` is
+ * `U+00A0 + i`. It keeps the source plain ASCII for the same reason as {@link INVISIBLE}.
+ */
+const LATIN1_ENTITIES = (
+	"nbsp iexcl cent pound curren yen brvbar sect uml copy ordf laquo not shy reg macr " +
+	"deg plusmn sup2 sup3 acute micro para middot cedil sup1 ordm raquo frac14 frac12 frac34 iquest " +
+	"Agrave Aacute Acirc Atilde Auml Aring AElig Ccedil Egrave Eacute Ecirc Euml Igrave Iacute Icirc Iuml " +
+	"ETH Ntilde Ograve Oacute Ocirc Otilde Ouml times Oslash Ugrave Uacute Ucirc Uuml Yacute THORN szlig " +
+	"agrave aacute acirc atilde auml aring aelig ccedil egrave eacute ecirc euml igrave iacute icirc iuml " +
+	"eth ntilde ograve oacute ocirc otilde ouml divide oslash ugrave uacute ucirc uuml yacute thorn yuml"
+).split(" ");
+
+/**
+ * Every named entity the fallback decodes, mapped to its code point.
+ *
+ * Not HTML's full table of two thousand: Latin-1, the markup-escaping five, and the punctuation a
+ * title actually uses — dashes, quotes, bullets, the ellipsis, the separators {@link TITLE_SEPARATORS}
+ * splits on. A name outside it is left as written, which is the behaviour every entity had before.
+ */
+const NAMED_ENTITIES: ReadonlyMap<string, number> = new Map([
+	...LATIN1_ENTITIES.map((name, index) => [name, 0xa0 + index] as const),
+	["amp", 0x26],
+	["lt", 0x3c],
+	["gt", 0x3e],
+	["quot", 0x22],
+	["apos", 0x27],
+	["ensp", 0x2002],
+	["emsp", 0x2003],
+	["thinsp", 0x2009],
+	["ndash", 0x2013],
+	["mdash", 0x2014],
+	["lsquo", 0x2018],
+	["rsquo", 0x2019],
+	["sbquo", 0x201a],
+	["ldquo", 0x201c],
+	["rdquo", 0x201d],
+	["bdquo", 0x201e],
+	["dagger", 0x2020],
+	["Dagger", 0x2021],
+	["bull", 0x2022],
+	["hellip", 0x2026],
+	["prime", 0x2032],
+	["lsaquo", 0x2039],
+	["rsaquo", 0x203a],
+	["euro", 0x20ac],
+	["trade", 0x2122],
+	["larr", 0x2190],
+	["rarr", 0x2192],
+	["hearts", 0x2665],
+]);
+
+/**
+ * Decodes the character references in text the regex fallback cut out of a document.
+ *
+ * `DOMParser` hands back text with entities already resolved, and this makes the fallback do the
+ * same. ⚠️ The fallback is not only the CLI's path: the dashboard runs the pipeline in a Web Worker,
+ * which has no `DOMParser`, so every drop in the browser is named through here too. Without this a
+ * page titled `Home &middot; Northwind` was stored and shown with the entity spelled out — and since
+ * `·` is a separator, decoding also lets {@link trimSuffix} cut the name down to `Northwind`.
+ *
+ * One pass, so `&amp;middot;` becomes the text `&middot;`, as a parser would make it. A numeric
+ * reference outside Unicode, or to a surrogate, becomes U+FFFD rather than throwing.
+ *
+ * @param text Raw text from between a tag's open and close, or from an attribute value.
+ * @returns The text with every reference this recognises replaced by its character.
+ */
+function decodeEntities(text: string): string {
+	return text.replace(
+		/&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([a-zA-Z][a-zA-Z0-9]{1,31}));/g,
+		(whole, decimal: string | undefined, hex: string | undefined, name: string | undefined) => {
+			if (name !== undefined) {
+				const code = NAMED_ENTITIES.get(name);
+				return code === undefined ? whole : String.fromCodePoint(code);
+			}
+
+			const code = decimal !== undefined ? Number(decimal) : Number.parseInt(hex ?? "", 16);
+			const valid = code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff);
+			return String.fromCodePoint(valid ? code : 0xfffd);
+		},
+	);
 }
 
 /**
