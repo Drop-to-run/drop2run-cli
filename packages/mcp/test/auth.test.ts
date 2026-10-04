@@ -137,8 +137,8 @@ describe("the code sign-in", () => {
 					return Response.json({
 						deviceCode: "d2d_the_long_one_that_collects_the_token",
 						userCode: "H7KD-9MXQ",
-						verificationUri: "https://dropto.run/device",
-						verificationUriComplete: "https://dropto.run/device?code=H7KD-9MXQ",
+						verificationUri: "https://app.dropto.run/device",
+						verificationUriComplete: "https://app.dropto.run/device?code=H7KD-9MXQ",
 						intervalSeconds: 0,
 					});
 				}
@@ -156,7 +156,7 @@ describe("the code sign-in", () => {
 		const answer = await signInWithCode(1, false);
 
 		expect(answer).toContain("H7KD-9MXQ");
-		expect(answer).toContain("https://dropto.run/device");
+		expect(answer).toContain("https://app.dropto.run/device");
 		// The long code is what exchanges for the token. It stays in this process; a transcript that
 		// carried it would be a credential in a chat log.
 		expect(answer).not.toContain("d2d_the_long_one_that_collects_the_token");

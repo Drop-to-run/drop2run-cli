@@ -47,6 +47,15 @@ export interface Credentials {
 export const DEFAULT_API_BASE_URL = "https://dropto.run/api";
 
 /**
+ * Production's marketing origin, which still proxies the API so released command lines keep working, but
+ * no longer serves the dashboard.
+ */
+const PRODUCTION_SITE_ORIGIN = "https://dropto.run";
+
+/** The origin production's dashboard moved to: sign-in, consent, account and site pages. */
+const PRODUCTION_DASHBOARD_ORIGIN = "https://app.dropto.run";
+
+/**
  * Reads the token and the API base URL.
  *
  * <b>Returns null rather than throwing.</b> An MCP server with no credential is not broken — it is
@@ -115,13 +124,18 @@ export function resolveApiBaseUrl(
  * page on production has signed a local command line in against the wrong account, which is confusing in
  * exactly the way credentials should not be.
  *
- * The API lives under `/api` on the dashboard origin (see plan §4), so this is that path removed.
+ * The API lives under `/api` on the dashboard origin (see plan §4), so this is that path removed — with
+ * one exception. Production's dashboard moved to its own host while `https://dropto.run/api` stayed, so
+ * that origin maps to the dashboard's host. The old paths there redirect too, but only after loading a
+ * page first, and a consent link printed in a terminal is worth getting right the first time.
  *
  * @param apiBaseUrl The API base URL.
  * @returns The origin the browser should be sent to.
  */
 export function dashboardUrlFor(apiBaseUrl: string): string {
-	return apiBaseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
+	const origin = apiBaseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
+
+	return origin === PRODUCTION_SITE_ORIGIN ? PRODUCTION_DASHBOARD_ORIGIN : origin;
 }
 
 /**
@@ -229,7 +243,7 @@ export function missingCredentialsMessage(surface: CredentialSurface = "cli"): s
 		surface === "mcp"
 			? [
 					"To set one without signing in here, create a token at",
-					"https://dropto.run/account/tokens and either:",
+					"https://app.dropto.run/account/tokens and either:",
 					`  - put it in ${configPath()} as {"token": "d2r_..."}, which this`,
 					"    server reads on every call and needs no restart, or",
 					`  - set ${TOKEN_VARIABLE} in the environment and restart this server, since it reads`,
@@ -237,7 +251,7 @@ export function missingCredentialsMessage(surface: CredentialSurface = "cli"): s
 				]
 			: [
 					"For CI, or where no browser can be opened, create a token at",
-					"https://dropto.run/account/tokens and either:",
+					"https://app.dropto.run/account/tokens and either:",
 					`  - set ${TOKEN_VARIABLE} in the environment, or`,
 					`  - put it in ${configPath()} as {"token": "d2r_..."}`,
 				];

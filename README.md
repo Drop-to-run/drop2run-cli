@@ -24,7 +24,7 @@ drop2run deploy dist
 ```
 
 `login` needs a browser on the same machine; `drop2run login --device` covers a remote shell, and CI
-uses a `DROP2RUN_TOKEN` from <https://dropto.run/account/tokens>. The other commands are `init`,
+uses a `DROP2RUN_TOKEN` from <https://app.dropto.run/account/tokens>. The other commands are `init`,
 `ls`, `open`, `rollback`, `rm`, `token list`, `whoami` and `where`, and `--json` on any of them
 prints machine-readable output.
 

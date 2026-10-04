@@ -144,15 +144,24 @@ describe("resolveApiBaseUrl", () => {
 });
 
 describe("dashboardUrlFor", () => {
-	it("strips the API path, because the two are one deployment", () => {
-		expect(dashboardUrlFor("https://dropto.run/api")).toBe("https://dropto.run");
+	it("sends production's API to the dashboard's own host, since the apex no longer serves it", () => {
+		expect(dashboardUrlFor("https://dropto.run/api")).toBe("https://app.dropto.run");
+		expect(dashboardUrlFor("https://dropto.run/api/")).toBe("https://app.dropto.run");
+	});
+
+	it("strips the API path of an API already on the dashboard's host", () => {
+		expect(dashboardUrlFor("https://app.dropto.run/api")).toBe("https://app.dropto.run");
 	});
 
 	it("follows a local API, so a local sign-in does not open production", () => {
 		expect(dashboardUrlFor("http://localhost:8001/api")).toBe("http://localhost:8001");
 	});
 
-	it("leaves an origin with no API path alone", () => {
-		expect(dashboardUrlFor("https://dropto.run")).toBe("https://dropto.run");
+	it("maps production's apex even with no API path", () => {
+		expect(dashboardUrlFor("https://dropto.run")).toBe("https://app.dropto.run");
+	});
+
+	it("leaves another origin with no API path alone", () => {
+		expect(dashboardUrlFor("https://staging.example.com")).toBe("https://staging.example.com");
 	});
 });

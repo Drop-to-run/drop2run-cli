@@ -65,9 +65,9 @@ CLI uses, so signing in once covers both. It is read on every call rather than a
 effect without restarting the client.
 
 **No browser on this machine?** In a container, over SSH, on a remote host, `login_code` gives a short
-code to enter at <https://dropto.run/device> from any other device.
+code to enter at <https://app.dropto.run/device> from any other device.
 
-**Or set a token yourself.** Create one at <https://dropto.run/account/tokens> and either put it in
+**Or set a token yourself.** Create one at <https://app.dropto.run/account/tokens> and either put it in
 `~/.config/drop2run/config.json` as `{"token": "d2r_..."}`, which needs no restart, or set
 `DROP2RUN_TOKEN` in the environment the client starts the server in. The environment takes precedence
 over the file — and because it is read once at startup, setting it in a shell afterwards changes

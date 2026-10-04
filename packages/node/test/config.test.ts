@@ -73,7 +73,7 @@ describe("missingCredentialsMessage", () => {
 	it("names both ways to fix it and where a token comes from", () => {
 		const message = missingCredentialsMessage();
 
-		expect(message).toContain("https://dropto.run/account/tokens");
+		expect(message).toContain("https://app.dropto.run/account/tokens");
 		expect(message).toContain(TOKEN_VARIABLE);
 		expect(message).toContain("config.json");
 	});

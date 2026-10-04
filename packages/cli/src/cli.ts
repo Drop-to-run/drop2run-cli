@@ -73,10 +73,10 @@ Where a site comes from
 Signing in
   \`login\` opens a browser and listens on 127.0.0.1, so it needs both on this
   machine. Over SSH, in a container or under WSL, use \`login --device\`: it
-  prints a short code to enter at https://dropto.run/device from anywhere.
+  prints a short code to enter at https://app.dropto.run/device from anywhere.
 
   For CI, neither flow applies — create a token at
-  https://dropto.run/account/tokens and either set DROP2RUN_TOKEN in your
+  https://app.dropto.run/account/tokens and either set DROP2RUN_TOKEN in your
   environment or put it in ~/.config/drop2run/config.json as {"token": "d2r_..."}.
 `;
 
@@ -346,7 +346,7 @@ async function dispatch(
 				: {
 						text:
 							`\`token ${rest[0]}\` does not exist. Only \`token list\` does: creating and revoking ` +
-							"a token need a browser session, at https://dropto.run/account/tokens.",
+							"a token need a browser session, at https://app.dropto.run/account/tokens.",
 						json: { error: `Unknown token subcommand "${rest[0]}".` },
 						code: 1,
 					};

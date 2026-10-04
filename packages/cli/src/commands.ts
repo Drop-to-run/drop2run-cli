@@ -288,7 +288,7 @@ export async function whoami(): Promise<CommandResult> {
 		return failure(
 			response.status === 401
 				? "This token is not valid any more. It may have been revoked or expired — create another " +
-						"at https://dropto.run/account/tokens."
+						"at https://app.dropto.run/account/tokens."
 				: `The API answered ${response.status}.`,
 		);
 	}

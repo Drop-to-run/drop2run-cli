@@ -82,7 +82,7 @@ server on `127.0.0.1`, which is what keeps it out of clipboards and scrollback. 
 
 ### `--device`, for a machine with no browser
 
-`drop2run login --device` prints a short code and waits. Enter it at <https://dropto.run/device> from any
+`drop2run login --device` prints a short code and waits. Enter it at <https://app.dropto.run/device> from any
 machine you are already signed in on — a phone will do — and the terminal picks up its token.
 
 The short code is not the credential; it names the pending request, so somebody reading it over your
@@ -92,7 +92,7 @@ works once.
 ### CI
 
 Neither flow works in CI — nothing there can open a browser or approve anything. Create a token at
-<https://dropto.run/account/tokens> and set it in the environment:
+<https://app.dropto.run/account/tokens> and set it in the environment:
 
 ```
 DROP2RUN_TOKEN=d2r_...
@@ -110,7 +110,7 @@ account" is answerable in an issue report or a CI log.
 
 Both need a browser session, and that is deliberate rather than missing. A token that can mint tokens is
 not a leaked credential but a permanent one: whoever takes it makes a second, and revoking the first
-changes nothing. Make and revoke tokens at <https://dropto.run/account/tokens>.
+changes nothing. Make and revoke tokens at <https://app.dropto.run/account/tokens>.
 
 `token list` does exist and answers what a terminal can answer — which machines hold a credential, and
 which of them has not used it since it was made. It prints prefixes, never secrets.

@@ -345,8 +345,8 @@ describe("startDevice", () => {
 				return Response.json({
 					deviceCode: "d2d_long",
 					userCode: "H7KD-9MXQ",
-					verificationUri: "https://dropto.run/device",
-					verificationUriComplete: "https://dropto.run/device?code=H7KD-9MXQ",
+					verificationUri: "https://app.dropto.run/device",
+					verificationUriComplete: "https://app.dropto.run/device?code=H7KD-9MXQ",
 					intervalSeconds: 5,
 				});
 			}),
