@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SiteDetail } from "../src/api.js";
-import { describeSite, servingModeOf } from "../src/describe.js";
+import { accessOf, describeSite, servingModeOf } from "../src/describe.js";
 
 /**
  * How a site's settings read in `drop2run info` and the MCP server's `get_site`.
@@ -13,6 +13,7 @@ const SITE: SiteDetail = {
 	url: "https://calm-cedar.dropto.live",
 	name: null,
 	status: "active",
+	invitedOnly: false,
 	liveDeployId: "01B",
 	spaMode: false,
 	docsMode: false,
@@ -28,7 +29,7 @@ const SITE: SiteDetail = {
 	deploys: [
 		{
 			deployId: "01B",
-			status: "ready",
+			status: "live",
 			fileCount: 3,
 			totalBytes: 10,
 			createdAt: "2026-10-06T00:00:00Z",
@@ -37,7 +38,7 @@ const SITE: SiteDetail = {
 		},
 		{
 			deployId: "01A",
-			status: "ready",
+			status: "superseded",
 			fileCount: 2,
 			totalBytes: 8,
 			createdAt: "2026-10-05T00:00:00Z",
@@ -51,8 +52,18 @@ describe("describeSite", () => {
 	it("marks the version being served, and only that one", () => {
 		const lines = describeSite(SITE).split("\n");
 
-		expect(lines.find((line) => line.includes("01B"))).toContain("← live");
-		expect(lines.find((line) => line.includes("01A"))).not.toContain("← live");
+		expect(lines.find((line) => line.includes("01B"))).toContain("← served");
+		expect(lines.find((line) => line.includes("01A"))).not.toContain("← served");
+	});
+
+	it("never calls a site public when whether it is invite-only could not be read", () => {
+		// The second request can fail, or meet an API that predates sharing. "Public" on that guess is
+		// the one wrong answer that would have somebody share a link they think is open.
+		expect(accessOf({ passwordProtected: false, invitedOnly: null })).not.toBe("public");
+		expect(accessOf({ passwordProtected: false, invitedOnly: true })).toBe("invite-only");
+		expect(accessOf({ passwordProtected: false, invitedOnly: false })).toBe("public");
+		expect(accessOf({ passwordProtected: true, invitedOnly: false })).toBe("password");
+		expect(describeSite({ ...SITE, invitedOnly: true })).toMatch(/access\s+invite-only/);
 	});
 
 	it("says when a version can no longer be rolled back to", () => {

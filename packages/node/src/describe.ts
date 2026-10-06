@@ -24,6 +24,23 @@ export function servingModeOf(site: Pick<SiteDetail, "spaMode" | "docsMode">): s
 }
 
 /**
+ * Says who can open a site.
+ *
+ * <b>Never "public" on a guess.</b> Invite-only is read from a second request that may not answer, and
+ * calling a site public because that request failed is the one wrong answer that matters here.
+ *
+ * @param site The site.
+ * @returns `password`, `invite-only`, `public`, or a sentence saying invite-only could not be read.
+ */
+export function accessOf(site: Pick<SiteDetail, "passwordProtected" | "invitedOnly">): string {
+	if (site.passwordProtected) return "password";
+	if (site.invitedOnly === true) return "invite-only";
+	if (site.invitedOnly === false) return "public";
+
+	return "no password (whether it is invite-only could not be read)";
+}
+
+/**
  * Describes a site's settings, state and recent versions as lines of text.
  *
  * A setting the plan does not include says so, because "off" alone reads as something that could be
@@ -37,8 +54,9 @@ export function servingModeOf(site: Pick<SiteDetail, "spaMode" | "docsMode">): s
 export function describeSite(site: SiteDetail, folderPath?: string): string {
 	const unavailable = (available: boolean) => (available ? "" : " (not on this plan)");
 	const versions = site.deploys.slice(0, VERSIONS_LISTED).map((deploy) => {
-		const live = deploy.deployId === site.liveDeployId ? " ← live" : "";
-		const kept = deploy.filesKept ? "" : ", files collected";
+		// Marked from the site's own pointer as well as the status, which is the one a rollback moves.
+		const live = deploy.deployId === site.liveDeployId ? " ← served" : "";
+		const kept = deploy.filesKept ? "" : ", files collected — cannot be rolled back to";
 
 		return `  ${deploy.deployId}  ${deploy.createdAt}  ${deploy.status}, ${deploy.fileCount} files${kept}${live}`;
 	});
@@ -48,6 +66,7 @@ export function describeSite(site: SiteDetail, folderPath?: string): string {
 		`${site.subdomain} — ${site.url}`,
 		`  name      ${site.name ?? "(none)"}`,
 		`  status    ${site.status}`,
+		`  access    ${accessOf(site)}`,
 		`  mode      ${servingModeOf(site)}${site.modeIsManual ? "" : " (detected on each publish)"}`,
 		`  password  ${site.passwordProtected ? "on" : "off"}${unavailable(site.passwordProtectionAvailable)}`,
 		`  forms     ${site.formsEnabled ? "on" : "off"}${unavailable(site.formsAvailable)}`,

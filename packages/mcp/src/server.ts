@@ -1,4 +1,5 @@
 import {
+	accessOf,
 	type Credentials,
 	deleteSite,
 	describeMode,
@@ -170,7 +171,13 @@ const SITE_INPUT = z.string().min(1).describe("Subdomain or site id, from list_s
 /** One version of a site, as `get_site` reports it. */
 const VERSION_OUTPUT = z.object({
 	deployId: z.string().describe("Identifier of the version, which rollback_site takes."),
-	status: z.string().describe("`ready` for a version that finished publishing."),
+	status: z
+		.string()
+		.describe(
+			"`live` for the one being served, `superseded` for one served before, `ready` for one that " +
+				"finished but was never served, `failed`, or a stage still under way. Whether it can be " +
+				"rolled back to is `filesKept`, not this.",
+		),
 	fileCount: z.number().int().describe("How many files it carries."),
 	createdAt: z.string().describe("When it was published, ISO 8601."),
 	filesKept: z
@@ -187,6 +194,13 @@ const SETTINGS_OUTPUT = {
 	name: z.string().nullable().describe("What it is called, or null."),
 	mode: z.enum(["static", "spa", "docs"]).describe("How it serves its files."),
 	passwordProtected: z.boolean().describe("Whether visitors must type a password."),
+	invitedOnly: z
+		.boolean()
+		.nullable()
+		.describe(
+			"Whether only invited people can open it, or null when that could not be read. Null does " +
+				"not mean public.",
+		),
 	formsEnabled: z.boolean().describe("Whether it accepts form submissions."),
 	expiresAt: z.string().nullable().describe("When it is scheduled to come down, or null."),
 	expiryAction: z.string().describe("What the takedown does: `pause` or `delete`."),
@@ -232,6 +246,7 @@ function structuredSite(site: SiteDetail): Record<string, unknown> {
 		status: site.status,
 		mode: servingModeOf(site),
 		passwordProtected: site.passwordProtected,
+		invitedOnly: site.invitedOnly,
 		formsEnabled: site.formsEnabled,
 		expiresAt: site.expiresAt,
 		expiryAction: site.expiryAction,
@@ -763,7 +778,9 @@ export function createServer(): McpServer {
 					.optional()
 					.describe(
 						"A password visitors must type before seeing the site, as the person gave it. An " +
-							"empty string removes it and makes the site public again.",
+							"empty string removes the password. On an invite-only site a password replaces " +
+							"invite-only and shuts out everyone on its list, so check get_site's `invitedOnly` " +
+							"and ask first.",
 					),
 				forms: z
 					.boolean()
@@ -811,9 +828,11 @@ export function createServer(): McpServer {
 				}
 
 				// A scheduled deletion is a deletion with a delay, so it asks what delete_site asks: the
-				// subdomain, told by the person, compared against the site that would actually go.
+				// subdomain, told by the person, compared against the site that would actually go. Not on
+				// a cancellation (`expiresAt: ""`), which schedules nothing.
 				if (
 					expiryAction === "delete" &&
+					expiresAt !== "" &&
 					confirm?.trim().toLowerCase() !== found.subdomain.toLowerCase()
 				) {
 					throw new Error(
@@ -828,7 +847,9 @@ export function createServer(): McpServer {
 					mode,
 					password,
 					expiresAt,
-					expiryAction,
+					// Dropped on a cancellation: the API reads an action only with a date, and sending
+					// `delete` alongside an empty date would still run its owner-only check for nothing.
+					expiryAction: expiresAt === "" ? undefined : expiryAction,
 					formsEnabled: forms,
 					folderId:
 						folder === undefined ? undefined : await resolveFolderTarget(credentials, folder),
@@ -836,10 +857,16 @@ export function createServer(): McpServer {
 				const settings = await updateSiteSettings(credentials, found.siteId, change);
 				const lines = [
 					`Updated ${found.subdomain}.`,
+					`  access    ${accessOf(settings)}`,
 					`  mode      ${servingModeOf(settings)}`,
-					`  password  ${settings.passwordProtected ? "on" : "off"}`,
 					`  forms     ${settings.formsEnabled ? "on" : "off"}`,
 					`  takedown  ${settings.expiresAt === null ? "none" : `${settings.expiresAt} (${settings.expiryAction})`}`,
+					...(settings.replacedInviteOnly
+						? [
+								"The password replaced invite-only: the people on its list can no longer get in " +
+									"without it. The list is kept for switching back in the dashboard.",
+							]
+						: []),
 					...(settings.live
 						? ["Reaching every edge takes up to about a minute."]
 						: ["Nothing is published yet, so this applies from the first publish."]),
@@ -850,6 +877,7 @@ export function createServer(): McpServer {
 					name: settings.name,
 					mode: servingModeOf(settings),
 					passwordProtected: settings.passwordProtected,
+					invitedOnly: settings.invitedOnly,
 					formsEnabled: settings.formsEnabled,
 					expiresAt: settings.expiresAt,
 					expiryAction: settings.expiryAction,
@@ -874,8 +902,13 @@ export function createServer(): McpServer {
 				const found = await findSite(credentials, site);
 				const state = await setSitePaused(credentials, found.siteId, "pause");
 
+				// Worded from the state rather than assumed: a site Drop2Run suspended stays suspended, and
+				// resume_site is refused for it.
 				return report(
-					`Paused ${state.subdomain}. Its files and subdomain are kept; resume_site puts it back.`,
+					state.status === "paused"
+						? `Paused ${state.subdomain}. Its files and subdomain are kept; resume_site puts it back.`
+						: `${state.subdomain} is ${state.status}, not paused by its owner, so resume_site cannot ` +
+								"bring it back. The pause is recorded and applies if that is lifted.",
 					{ ...state },
 				);
 			}),

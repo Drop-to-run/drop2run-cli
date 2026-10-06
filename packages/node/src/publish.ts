@@ -125,8 +125,8 @@ async function resolveSite(
 	if (site !== undefined && folder !== undefined) {
 		throw new Error(
 			"A folder only says where a new site goes, so it cannot be given with an existing site. " +
-				"Leave the site out to create one in that folder, or move the existing site from the " +
-				"dashboard.",
+				"Leave the site out to create one in that folder, or move the existing site with " +
+				"`drop2run set folder` or the `update_site` tool's `folder`.",
 		);
 	}
 

@@ -27,6 +27,7 @@ export {
 	type PromotedDeploy,
 	promoteDeploy,
 	ROOT_FOLDER,
+	readInvitedOnly,
 	resolveFolder,
 	resolveFolderTarget,
 	type ServingMode,
@@ -54,7 +55,7 @@ export {
 	saveToken,
 	TOKEN_VARIABLE,
 } from "./config.js";
-export { describeSite, servingModeOf } from "./describe.js";
+export { accessOf, describeSite, servingModeOf } from "./describe.js";
 export {
 	type Attempt,
 	type Callback,

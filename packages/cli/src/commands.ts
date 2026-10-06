@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import {
+	accessOf,
 	type Credentials,
 	clearToken,
 	clientName,
@@ -444,8 +445,8 @@ export async function deployCommand(
 	if (newSite.folder !== undefined && target !== undefined && project !== null) {
 		return failure(
 			`This folder's ${PROJECT_FILE} already publishes to ${project.subdomain || project.siteId}, and ` +
-				"`--folder` only files a new site. Move that site from the dashboard, or add " +
-				"`--subdomain` to create a new one in the folder.",
+				"`--folder` only files a new site. Move that site with `drop2run set folder <path>`, or " +
+				"add `--subdomain` to create a new one in the folder.",
 		);
 	}
 
@@ -760,9 +761,14 @@ export async function pauseOrResume(
 
 		return {
 			text:
-				action === "pause"
-					? `Paused ${state.subdomain}. Its files and subdomain are kept; \`drop2run resume\` puts it back.`
-					: `${state.subdomain} is back on the air.\n${summary.url}`,
+				action === "resume"
+					? `${state.subdomain} is back on the air.\n${summary.url}`
+					: state.status === "paused"
+						? `Paused ${state.subdomain}. Its files and subdomain are kept; \`drop2run resume\` puts it back.`
+						: // A site Drop2Run suspended stays suspended: the pause is recorded for when that lifts,
+							// and promising `resume` here would be promising something the API refuses.
+							`${state.subdomain} is ${state.status}, not paused by you, so \`drop2run resume\` ` +
+							"cannot bring it back. The pause is recorded and applies if that is lifted.",
 			json: state,
 			code: 0,
 		};
@@ -818,6 +824,16 @@ function settingChange(
 
 	if (then !== undefined && setting !== "expires") {
 		return { refusal: "`--then` only applies to `set expires`." };
+	}
+
+	// A second word is refused rather than dropped: `set mode spa other-site` reads like naming a site,
+	// and dropping it would change the site in drop2run.json instead. `password` has its own refusal.
+	if (setting !== "name" && setting !== "password" && values.length > 1) {
+		return {
+			refusal:
+				`\`set ${setting}\` takes one value, and "${values.slice(1).join(" ")}" is extra. ` +
+				"Name the site with `--site <subdomain>`.",
+		};
 	}
 
 	switch (setting) {
@@ -941,7 +957,17 @@ export async function set(
 export async function unset(
 	site: string | undefined,
 	setting: string | undefined,
+	extra: readonly string[] = [],
 ): Promise<CommandResult> {
+	// Refused for the reason `set` refuses a second value: `unset password other-site` would otherwise
+	// make the site in drop2run.json public.
+	if (extra.length > 0) {
+		return failure(
+			`\`unset ${setting}\` takes nothing after it, and "${extra.join(" ")}" is extra. Name the site ` +
+				"with `--site <subdomain>`.",
+		);
+	}
+
 	// Empty strings, which the API reads as "clear" — null would mean "leave alone".
 	// A Map rather than an object literal, so `unset toString` finds nothing instead of a prototype method.
 	const clear = new Map<string, SiteSettingsChange>([
@@ -996,10 +1022,16 @@ async function applied(
 		text: [
 			`Updated ${subdomain}.`,
 			`  name      ${settings.name ?? "(none)"}`,
+			`  access    ${accessOf(settings)}`,
 			`  mode      ${servingModeOf(settings)}`,
-			`  password  ${settings.passwordProtected ? "on" : "off"}`,
 			`  forms     ${settings.formsEnabled ? "on" : "off"}`,
 			`  takedown  ${takedown}`,
+			...(settings.replacedInviteOnly
+				? [
+						"The password replaced invite-only: the people on its list can no longer get in " +
+							"without it. The list is kept for if you switch back in the dashboard.",
+					]
+				: []),
 			settings.live
 				? "Reaching every edge takes up to about a minute."
 				: "Nothing is published yet, so this applies from the first publish.",

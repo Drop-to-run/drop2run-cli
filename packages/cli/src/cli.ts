@@ -70,7 +70,8 @@ Flags
                  (the default, keeps the files) or delete (needs --yes)
 
 Settings
-  set name <text>               What the dashboard calls the site
+  set name <text>               What the dashboard calls the site; put a
+                                name with words starting "-" after --
   set mode static|spa|docs      static answers 404 for a missing path, spa
                                 falls back to index.html, docs uses the viewer
   set password                  Typed at a hidden prompt, or piped in:
@@ -188,7 +189,7 @@ const SUBDOMAIN_FLAG: NewSiteFlag = {
 const FOLDER_FLAG: NewSiteFlag = {
 	flag: "--folder",
 	example: "Clients/Acme",
-	effect: "`--folder` only files a new one — move an existing site from the dashboard",
+	effect: "`--folder` only files a new one — move an existing site with `drop2run set folder`",
 	elsewhere: (command) =>
 		command === "ls" || command === "list" ? " `drop2run folders` lists them." : "",
 };
@@ -246,12 +247,18 @@ function newSiteFlagProblem(
 /**
  * Runs the CLI.
  *
- * @param argv Arguments after the program name.
+ * <b>`--` ends the flags.</b> Every word after it is positional, so `set name -- -draft` names a site
+ * "-draft" instead of losing the word as an unknown flag. Flags are read only from what comes before it.
+ *
+ * @param commandLine Arguments after the program name.
  * @returns What to print and the exit code.
  */
-export async function run(argv: readonly string[]): Promise<CommandResult> {
+export async function run(commandLine: readonly string[]): Promise<CommandResult> {
+	const end = commandLine.indexOf("--");
+	const argv = end === -1 ? commandLine : commandLine.slice(0, end);
+	const literal = end === -1 ? [] : commandLine.slice(end + 1);
 	const json = argv.includes("--json");
-	const positional = positionals(argv);
+	const positional = [...positionals(argv), ...literal];
 	const [command, ...rest] = positional;
 
 	if (argv.includes("--version")) {
@@ -378,7 +385,7 @@ async function dispatch(
 			// and a name may be several words.
 			return await set(site, rest[0], rest.slice(1), { then, confirmed });
 		case "unset":
-			return await unset(site, rest[0]);
+			return await unset(site, rest[0], rest.slice(1));
 		case "pause":
 		case "resume":
 			return await pauseOrResume(command, rest[0] ?? site);

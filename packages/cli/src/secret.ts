@@ -58,7 +58,7 @@ export async function readSecret(
 	input.resume();
 
 	return await new Promise<string>((resolve, reject) => {
-		let value = "";
+		const line = new HiddenLine();
 
 		/**
 		 * Puts the terminal back the way it was found.
@@ -71,30 +71,85 @@ export async function readSecret(
 		};
 
 		/**
-		 * Handles what was typed, character by character, since raw mode delivers no lines.
+		 * Handles what was typed, since raw mode delivers keystrokes rather than lines.
 		 *
 		 * @param chunk The characters that arrived.
 		 */
 		function onData(chunk: string) {
-			for (const character of chunk) {
-				if (character === "\r" || character === "\n" || character === "\u0004") {
-					finish();
-					resolve(value);
-					return;
-				}
-				if (character === "\u0003") {
-					finish();
-					reject(new Error("Cancelled."));
-					return;
-				}
-				if (character === "\u007f" || character === "\b") {
-					value = value.slice(0, -1);
-					continue;
-				}
-				value += character;
-			}
+			const outcome = line.type(chunk);
+			if (outcome === "more") return;
+
+			finish();
+			if (outcome === "cancelled") reject(new Error("Cancelled."));
+			else resolve(line.value);
 		}
 
 		input.on("data", onData);
 	});
+}
+
+/**
+ * The line being typed at a prompt that does not echo, built from raw keystrokes.
+ *
+ * <b>Only printable characters become part of it.</b> Raw mode hands over every key — arrows and Home
+ * arrive as escape sequences, Tab and Ctrl+W as control characters — and a reader that kept them would
+ * store a password the person never typed and cannot type again, locking every visitor out. Nothing is
+ * echoed, so the person cannot see that it happened either.
+ */
+export class HiddenLine {
+	/** What has been typed, one entry per code point, so Backspace never splits a surrogate pair. */
+	private readonly characters: string[] = [];
+
+	/** Where an escape sequence has got to: none, just after ESC, or inside a `CSI`/`SS3` sequence. */
+	private escape: "none" | "started" | "sequence" = "none";
+
+	/** The line so far. */
+	get value(): string {
+		return this.characters.join("");
+	}
+
+	/**
+	 * Takes the characters one chunk of input carries.
+	 *
+	 * @param chunk What arrived.
+	 * @returns `done` on Enter or Ctrl+D, `cancelled` on Ctrl+C, `more` otherwise.
+	 */
+	type(chunk: string): "done" | "cancelled" | "more" {
+		for (const character of chunk) {
+			const code = character.codePointAt(0) ?? 0;
+
+			if (this.escape === "started") {
+				// `ESC [` and `ESC O` open a sequence that runs to its final byte; ESC and any other key is
+				// Alt+key, which is that one key and nothing more.
+				this.escape = character === "[" || character === "O" ? "sequence" : "none";
+				continue;
+			}
+			if (this.escape === "sequence") {
+				if (code >= 0x40 && code <= 0x7e) this.escape = "none";
+				continue;
+			}
+
+			if (character === "\r" || character === "\n" || character === "\u0004") return "done";
+			if (character === "\u0003") return "cancelled";
+			if (character === "\u001b") {
+				this.escape = "started";
+				continue;
+			}
+			if (character === "\u007f" || character === "\b") {
+				this.characters.pop();
+				continue;
+			}
+			// Ctrl+U clears the line, as it does at a shell prompt — somebody who pressed it meant to start
+			// again, and typing on after it would otherwise append to what they meant to discard.
+			if (character === "\u0015") {
+				this.characters.length = 0;
+				continue;
+			}
+			if (code < 0x20) continue;
+
+			this.characters.push(character);
+		}
+
+		return "more";
+	}
 }

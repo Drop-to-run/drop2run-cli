@@ -522,6 +522,21 @@ describe("the tools that manage an existing site", () => {
 		);
 	});
 
+	it("cancels a takedown without asking for confirm, and without sending the action", async () => {
+		// Cancelling schedules nothing, so the deletion confirmation has nothing to guard — and an
+		// action sent beside an empty date would only trip the API's owner-only check for no reason.
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+
+		const result = await (await connect()).callTool({
+			name: "update_site",
+			arguments: { site: "calm-cedar", expiresAt: "", expiryAction: "delete" },
+		});
+
+		expect(result.isError).toBeFalsy();
+		expect(seen).toContain('PATCH /api/sites/01J {"expiresAt":""}');
+	});
+
 	it("sends both mode switches, so changing mode cannot leave two on", async () => {
 		// The API refuses `spaMode` and `docsMode` both true. Sending only the one being turned on
 		// would be refused for a site currently in the other mode.

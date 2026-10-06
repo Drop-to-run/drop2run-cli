@@ -187,7 +187,11 @@ export async function promoteDeploy(
 export interface SiteVersion {
 	/** ULID of the deploy, which a rollback takes. */
 	readonly deployId: string;
-	/** Where the deploy got to: `ready` for one that finished, otherwise how far it got. */
+	/**
+	 * Where the deploy got to: `live` for the one being served, `superseded` for one that was live
+	 * before, `ready` for one that finished but was never served, `failed`, or a stage still under way.
+	 * Whether it can be rolled back to is {@link filesKept}, not this.
+	 */
 	readonly status: string;
 	/** How many files it carries. */
 	readonly fileCount: number;
@@ -209,8 +213,13 @@ export interface SiteVersion {
  * package has no equivalent of.
  */
 export interface SiteDetail extends SiteSummary {
-	/** `active`, `paused`, or a state the platform put it in, such as `suspended`. */
+	/** `active`, `paused`, or a state the platform put it in, such as `suspended` or `quota-held`. */
 	readonly status: string;
+	/**
+	 * Whether only invited people can open the site, or null when that could not be read — an API that
+	 * predates sharing, or a request that failed. Null is "unknown", never "no".
+	 */
+	readonly invitedOnly: boolean | null;
 	/** ULID of the deploy being served, or null when nothing has been published. */
 	readonly liveDeployId: string | null;
 	/** Whether an unmatched path falls back to index.html. */
@@ -240,6 +249,47 @@ export interface SiteDetail extends SiteSummary {
 }
 
 /**
+ * Turns the API's spelling of an enum value into the one these tools report.
+ *
+ * The API sends a site's status and expiry action as the enum's own name (`Active`, `QuotaHeld`,
+ * `Pause`), while deploy statuses arrive lowercase. Reported kebab-case so every status reads the same
+ * way and `QuotaHeld` does not become `quotaheld`.
+ *
+ * @param value The API's spelling.
+ * @returns The lowercase, hyphenated form.
+ */
+function enumName(value: string): string {
+	return value.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+}
+
+/**
+ * Reads whether only invited people can open a site.
+ *
+ * <b>Asked of the viewers listing, because `GET /sites/{id}` does not carry it.</b> Answers null rather
+ * than throwing when it cannot be read — an API deployed before sharing has no such route — because
+ * "unknown" is a true answer and "public" would not be.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @returns Whether the site is invite-only, or null when that could not be read.
+ */
+export async function readInvitedOnly(
+	credentials: Credentials,
+	siteId: string,
+): Promise<boolean | null> {
+	try {
+		const page = await call<{ invitedOnly?: boolean }>(
+			credentials,
+			`sites/${encodeURIComponent(siteId)}/viewers?pageSize=1`,
+		);
+
+		return typeof page.invitedOnly === "boolean" ? page.invitedOnly : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Reads one site's settings, state and versions.
  *
  * @param credentials Token and base URL.
@@ -248,17 +298,18 @@ export interface SiteDetail extends SiteSummary {
  * @throws Error carrying the API's own wording when it refuses.
  */
 export async function getSite(credentials: Credentials, siteId: string): Promise<SiteDetail> {
-	const site = await call<SiteDetail>(credentials, `sites/${encodeURIComponent(siteId)}`);
+	const [site, invitedOnly] = await Promise.all([
+		call<SiteDetail>(credentials, `sites/${encodeURIComponent(siteId)}`),
+		readInvitedOnly(credentials, siteId),
+	]);
 
 	return {
 		siteId: site.siteId,
 		subdomain: site.subdomain,
 		url: site.url,
 		name: site.name,
-		// Lowercased here because the API sends the enum's own spelling (`Active`, `Pause`) on these two
-		// while deploy statuses arrive lowercase, and a caller comparing against one spelling should not
-		// have to know which field uses which.
-		status: site.status.toLowerCase(),
+		status: enumName(site.status),
+		invitedOnly,
 		liveDeployId: site.liveDeployId,
 		spaMode: site.spaMode,
 		docsMode: site.docsMode,
@@ -268,7 +319,7 @@ export async function getSite(credentials: Credentials, siteId: string): Promise
 		formsEnabled: site.formsEnabled,
 		formsAvailable: site.formsAvailable,
 		expiresAt: site.expiresAt,
-		expiryAction: site.expiryAction.toLowerCase(),
+		expiryAction: enumName(site.expiryAction),
 		scheduledExpiryAvailable: site.scheduledExpiryAvailable,
 		folderId: site.folderId,
 		deploys: site.deploys.map((deploy) => ({
@@ -334,6 +385,14 @@ export interface SiteSettings {
 	readonly formsEnabled: boolean;
 	/** The folder it is filed in, or null. */
 	readonly folderId: string | null;
+	/** Whether only invited people can open it, or null from an API that predates sharing. */
+	readonly invitedOnly: boolean | null;
+	/**
+	 * Whether this change turned invite-only off by setting a password. The API does that rather than
+	 * refusing — a site has one way of being private — and every invited person loses access with it, so
+	 * a caller has to be able to say so.
+	 */
+	readonly replacedInviteOnly: boolean;
 }
 
 /**
@@ -371,13 +430,28 @@ export async function updateSiteSettings(
 
 	if (Object.keys(body).length === 0) throw new Error("Nothing to change — name a setting.");
 
-	const settings = await call<SiteSettings>(credentials, `sites/${encodeURIComponent(siteId)}`, {
+	// Read before, because the response can only say invite-only is off now, not that it was on.
+	const wasInvitedOnly =
+		change.password !== undefined && change.password !== ""
+			? await readInvitedOnly(credentials, siteId)
+			: null;
+
+	const settings = await call<
+		Omit<SiteSettings, "replacedInviteOnly" | "invitedOnly"> & {
+			invitedOnly?: boolean;
+		}
+	>(credentials, `sites/${encodeURIComponent(siteId)}`, {
 		method: "PATCH",
 		body: JSON.stringify(body),
 	});
+	const invitedOnly = typeof settings.invitedOnly === "boolean" ? settings.invitedOnly : null;
 
-	// Lowercased for the reason getSite gives.
-	return { ...settings, expiryAction: settings.expiryAction.toLowerCase() };
+	return {
+		...settings,
+		expiryAction: enumName(settings.expiryAction),
+		invitedOnly,
+		replacedInviteOnly: wasInvitedOnly === true && invitedOnly === false,
+	};
 }
 
 /** A site's state after a pause or a resume. */
@@ -386,7 +460,7 @@ export interface SitePauseState {
 	readonly siteId: string;
 	/** Its subdomain. */
 	readonly subdomain: string;
-	/** `active`, `paused`, or a state the platform put it in. */
+	/** `active`, `paused`, or a state the platform put it in, such as `suspended`. */
 	readonly status: string;
 	/** Whether its owner is the one who paused it. */
 	readonly ownerPaused: boolean;
@@ -416,11 +490,10 @@ export async function setSitePaused(
 		{ method: "POST" },
 	);
 
-	// Lowercased for the reason getSite gives.
 	return {
 		siteId: state.siteId,
 		subdomain: state.subdomain,
-		status: state.status.toLowerCase(),
+		status: enumName(state.status),
 		ownerPaused: state.ownerPaused,
 	};
 }

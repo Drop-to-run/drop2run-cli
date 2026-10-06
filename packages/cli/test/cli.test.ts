@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { run } from "../src/cli.js";
 import { set } from "../src/commands.js";
-import { readSecret } from "../src/secret.js";
+import { HiddenLine, readSecret } from "../src/secret.js";
 
 /**
  * What the command line does with what it was typed.
@@ -575,8 +575,9 @@ describe("--folder", () => {
 
 		const result = await run(["deploy", "--site", "calm-cedar", "--folder", "Clients"]);
 
+		// Names the command that does move a site, which the dashboard used to be the only way to.
 		expect(result.code).toBe(1);
-		expect(result.text).toContain("dashboard");
+		expect(result.text).toContain("drop2run set folder");
 		expect(fetched).not.toHaveBeenCalled();
 	});
 
@@ -887,6 +888,70 @@ describe("set", () => {
 		expect(result.text).not.toContain("DROP2RUN_TOKEN");
 	});
 
+	it("refuses a second value rather than dropping it, so a site named there is not missed", async () => {
+		// `set mode spa other-site` reads like naming a site. Dropping the word would change the site in
+		// drop2run.json instead, and nothing in the output would say which one changed.
+		const fetched = vi.fn(async () => Response.json({}));
+		vi.stubGlobal("fetch", fetched);
+
+		const result = await run(["set", "mode", "spa", "other-site"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("--site");
+		expect(fetched).not.toHaveBeenCalled();
+	});
+
+	it("keeps words starting with a dash in a name given after --", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", settingsApi(seen));
+
+		await run(["set", "--site", "calm-cedar", "name", "--", "Release", "-", "v2"]);
+
+		expect(patchOf(seen)).toBe('PATCH /api/sites/01J {"name":"Release - v2"}');
+	});
+
+	it("says when a password replaced invite-only", async () => {
+		// The API turns invite-only off rather than refusing, and everybody on the list loses access with
+		// it. The response alone cannot say that happened, so the state is read first.
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const base = settingsApi([]);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL, init?: RequestInit) => {
+				const path = new URL(String(input)).pathname;
+
+				if (path.endsWith("/viewers")) return Response.json({ invitedOnly: true });
+				if (init?.method === "PATCH") {
+					return Response.json({
+						siteId: "01J",
+						name: null,
+						spaMode: false,
+						docsMode: false,
+						live: true,
+						passwordProtected: true,
+						expiresAt: null,
+						expiryAction: "Pause",
+						formsEnabled: false,
+						folderId: null,
+						invitedOnly: false,
+					});
+				}
+				return base(input, init);
+			}),
+		);
+
+		const result = await set(
+			"calm-cedar",
+			"password",
+			[],
+			{ confirmed: false },
+			async () => "secret-password",
+		);
+
+		expect(result.code).toBe(0);
+		expect(result.text).toContain("replaced invite-only");
+	});
+
 	it("refuses --then on anything but expires", async () => {
 		const result = await run(["set", "mode", "spa", "--then", "delete"]);
 
@@ -950,6 +1015,18 @@ describe("unset", () => {
 		expect(patchOf(seen)).toBe('PATCH /api/sites/01J {"password":""}');
 	});
 
+	it("refuses a word after the setting, rather than clearing the project's site", async () => {
+		// `unset password other-site` dropping `other-site` would make the site in drop2run.json public.
+		const fetched = vi.fn(async () => Response.json({}));
+		vi.stubGlobal("fetch", fetched);
+
+		const result = await run(["unset", "password", "other-site"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("--site");
+		expect(fetched).not.toHaveBeenCalled();
+	});
+
 	it("knows nothing on the object prototype", async () => {
 		const result = await run(["unset", "toString", "--site", "calm-cedar"]);
 
@@ -992,5 +1069,59 @@ describe("readSecret", () => {
 		});
 
 		expect(await readSecret("unused", piped, { write: () => {} })).toBe("two words here");
+	});
+});
+
+describe("HiddenLine", () => {
+	it("keeps no arrow key, Tab or Alt+key in the password", () => {
+		// Nothing is echoed, so a password carrying `\x1b[D` from a left-arrow is one nobody can type
+		// again — and every visitor is locked out by it.
+		const line = new HiddenLine();
+
+		expect(line.type("ab\u001b[Dc\td\u001bxe\u001bOAf\r")).toBe("done");
+		expect(line.value).toBe("abcdef");
+	});
+
+	it("deletes a whole emoji on Backspace, not half of it", () => {
+		const line = new HiddenLine();
+
+		line.type("a😀\u007f");
+
+		expect(line.value).toBe("a");
+	});
+
+	it("starts again on Ctrl+U, and cancels on Ctrl+C", () => {
+		const line = new HiddenLine();
+
+		line.type("wrong\u0015right");
+		expect(line.value).toBe("right");
+		expect(line.type("\u0003")).toBe("cancelled");
+	});
+});
+
+describe("pause on a site Drop2Run suspended", () => {
+	it("does not promise that resume brings it back", async () => {
+		// The API records the pause and answers `Suspended`; resume is refused for such a site.
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const base = settingsApi([]);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL, init?: RequestInit) =>
+				new URL(String(input)).pathname.endsWith("/pause")
+					? Response.json({
+							siteId: "01J",
+							subdomain: "calm-cedar",
+							status: "Suspended",
+							ownerPaused: true,
+							statusChangedAt: null,
+						})
+					: base(input, init),
+			),
+		);
+
+		const result = await run(["pause", "calm-cedar"]);
+
+		expect(result.text).toContain("suspended");
+		expect(result.text).toContain("cannot bring it back");
 	});
 });
