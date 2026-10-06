@@ -1099,6 +1099,65 @@ describe("HiddenLine", () => {
 	});
 });
 
+describe("info against an API whose site detail has no folderId", () => {
+	it("reads the folder from the listing instead of calling the site top-level", async () => {
+		// Production answered GET /sites/{id} without `folderId` while its listing carried it, and the
+		// first build printed `folder undefined`. Defaulting to null would have been worse: a filed site
+		// reported as being at the top level.
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL) => {
+				const path = new URL(String(input)).pathname;
+
+				if (path === "/api/sites") {
+					return Response.json({
+						sites: [
+							{
+								siteId: "01J",
+								subdomain: "calm-cedar",
+								url: "https://calm-cedar.dropto.live",
+								name: null,
+								folderId: "01F",
+							},
+						],
+					});
+				}
+				if (path === "/api/site-folders") {
+					return Response.json({ folders: [{ folderId: "01F", parentId: null, name: "Clients" }] });
+				}
+				if (path.endsWith("/viewers")) return new Response(null, { status: 404 });
+
+				return Response.json({
+					siteId: "01J",
+					subdomain: "calm-cedar",
+					url: "https://calm-cedar.dropto.live",
+					name: null,
+					status: "Active",
+					liveDeployId: null,
+					spaMode: false,
+					docsMode: false,
+					modeIsManual: false,
+					passwordProtected: false,
+					passwordProtectionAvailable: true,
+					formsEnabled: false,
+					formsAvailable: true,
+					expiresAt: null,
+					expiryAction: "Pause",
+					scheduledExpiryAvailable: true,
+					deploys: [],
+				});
+			}),
+		);
+
+		const result = await run(["info", "calm-cedar"]);
+
+		expect(result.code).toBe(0);
+		expect(result.text).toMatch(/folder\s+Clients/);
+		expect(result.text).not.toContain("undefined");
+	});
+});
+
 describe("pause on a site Drop2Run suspended", () => {
 	it("does not promise that resume brings it back", async () => {
 		// The API records the pause and answers `Suspended`; resume is refused for such a site.

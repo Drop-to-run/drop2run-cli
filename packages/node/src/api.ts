@@ -290,6 +290,27 @@ export async function readInvitedOnly(
 }
 
 /**
+ * Reads which folder a site is filed in from the sites listing.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param subdomain Its subdomain, which the listing's search matches.
+ * @returns The folder id, or null at the top level or when the listing does not find it.
+ */
+async function folderFromListing(
+	credentials: Credentials,
+	siteId: string,
+	subdomain: string,
+): Promise<string | null> {
+	const { sites } = await call<{ sites: { siteId: string; folderId?: string | null }[] }>(
+		credentials,
+		`sites?pageSize=${SITES_PER_REQUEST}&q=${encodeURIComponent(subdomain)}`,
+	);
+
+	return sites.find((candidate) => candidate.siteId === siteId)?.folderId ?? null;
+}
+
+/**
  * Reads one site's settings, state and versions.
  *
  * @param credentials Token and base URL.
@@ -299,9 +320,19 @@ export async function readInvitedOnly(
  */
 export async function getSite(credentials: Credentials, siteId: string): Promise<SiteDetail> {
 	const [site, invitedOnly] = await Promise.all([
-		call<SiteDetail>(credentials, `sites/${encodeURIComponent(siteId)}`),
+		call<Omit<SiteDetail, "folderId"> & { folderId?: string | null }>(
+			credentials,
+			`sites/${encodeURIComponent(siteId)}`,
+		),
 		readInvitedOnly(credentials, siteId),
 	]);
+
+	// An API older than folders on the detail answers without the field, while its listing carries it.
+	// Read from there rather than defaulted to null, which would report a filed site as at the top level.
+	const folderId =
+		site.folderId !== undefined
+			? site.folderId
+			: await folderFromListing(credentials, site.siteId, site.subdomain);
 
 	return {
 		siteId: site.siteId,
@@ -321,7 +352,7 @@ export async function getSite(credentials: Credentials, siteId: string): Promise
 		expiresAt: site.expiresAt,
 		expiryAction: enumName(site.expiryAction),
 		scheduledExpiryAvailable: site.scheduledExpiryAvailable,
-		folderId: site.folderId,
+		folderId,
 		deploys: site.deploys.map((deploy) => ({
 			deployId: deploy.deployId,
 			status: deploy.status,
