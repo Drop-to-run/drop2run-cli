@@ -19,16 +19,27 @@ export {
 	createSite,
 	deleteSite,
 	findSite,
+	getSite,
 	listFolders,
 	listSites,
 	listTokens,
 	lookUpSite,
 	type PromotedDeploy,
 	promoteDeploy,
+	ROOT_FOLDER,
 	resolveFolder,
+	resolveFolderTarget,
+	type ServingMode,
+	type SiteDetail,
 	type SiteFolder,
 	type SiteListing,
+	type SitePauseState,
+	type SiteSettings,
+	type SiteSettingsChange,
 	type SiteSummary,
+	type SiteVersion,
+	setSitePaused,
+	updateSiteSettings,
 } from "./api.js";
 export {
 	type CredentialSurface,
@@ -43,6 +54,7 @@ export {
 	saveToken,
 	TOKEN_VARIABLE,
 } from "./config.js";
+export { describeSite, servingModeOf } from "./describe.js";
 export {
 	type Attempt,
 	type Callback,

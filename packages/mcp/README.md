@@ -87,6 +87,11 @@ lose it.
 | `list_sites` | Lists the sites on the account |
 | `list_folders` | Lists the account's folders, each with the path `folder` accepts |
 | `delete_site` | Deletes a site permanently, subdomain included — requires the subdomain repeated as `confirm` |
+| `get_site` | Reads a site's settings, whether it is paused, and its versions with the live one marked |
+| `update_site` | Changes a site's name, serving mode, password, forms, scheduled takedown or folder |
+| `pause_site` | Takes a site off the air, keeping its files, versions and subdomain |
+| `resume_site` | Puts a paused site back on the air |
+| `rollback_site` | Serves an earlier version again, by its id from `get_site` |
 
 Both publish tools take an optional `site` — a subdomain or site id to publish over. Leave it out and a
 new site is created.
@@ -101,6 +106,12 @@ And both take an optional `folder`, which files the new site in one of the accou
 by path such as `Clients/Acme`, or by the id `list_folders` shows. Like `subdomain` it only describes a new
 site, so it cannot be combined with `site`. It never creates a folder: one that does not exist is refused
 with the list of those that do, and nothing is published.
+
+`update_site` changes only the settings it is given. An empty `name`, `password` or `expiresAt` clears
+that setting, and `folder: "root"` moves the site back to the top level. A takedown pauses the site by
+default; `expiryAction: "delete"` removes it instead, and asks for the subdomain as `confirm` the way
+`delete_site` does. Settings your plan does not include are refused with the reason, and `get_site` says
+which ones those are.
 
 Both sign-in tools answer "not approved yet" rather than failing while they wait, and calling them
 again keeps waiting on the same sign-in. Neither replaces a token that is already stored unless asked

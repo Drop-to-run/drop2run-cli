@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { run } from "../src/cli.js";
+import { set } from "../src/commands.js";
+import { readSecret } from "../src/secret.js";
 
 /**
  * What the command line does with what it was typed.
@@ -736,5 +738,259 @@ describe("a folder that is not there", () => {
 		expect(result.code).toBe(1);
 		expect(result.text).toContain("drop2run-no-such-folder");
 		expect(fetched).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * Answers the API calls the settings commands make, recording each one as `METHOD path body`.
+ *
+ * The settings and pause responses carry the API's own enum spelling (`Pause`, `Paused`), which is what
+ * the lowercasing in `@drop2run/node` exists for.
+ *
+ * @param seen Collects the requests.
+ * @returns The fetch stub.
+ */
+function settingsApi(seen: string[]) {
+	process.env.DROP2RUN_TOKEN = "d2r_test";
+
+	return vi.fn(async (input: string | URL, init?: RequestInit) => {
+		const url = new URL(String(input));
+		seen.push(`${init?.method ?? "GET"} ${url.pathname} ${init?.body ?? ""}`.trim());
+
+		if (url.pathname === "/api/sites") {
+			return Response.json({
+				sites: [
+					{
+						siteId: "01J",
+						subdomain: "calm-cedar",
+						url: "https://calm-cedar.dropto.live",
+						name: null,
+					},
+				],
+			});
+		}
+
+		if (url.pathname.endsWith("/pause")) {
+			return Response.json({
+				siteId: "01J",
+				subdomain: "calm-cedar",
+				status: "Paused",
+				ownerPaused: true,
+				statusChangedAt: null,
+			});
+		}
+
+		return Response.json({
+			siteId: "01J",
+			name: null,
+			spaMode: false,
+			docsMode: false,
+			live: true,
+			passwordProtected: false,
+			expiresAt: null,
+			expiryAction: "Pause",
+			formsEnabled: false,
+			folderId: null,
+		});
+	});
+}
+
+/**
+ * The PATCH a command sent, if any.
+ *
+ * @param seen What the stub recorded.
+ * @returns The PATCH line, or undefined.
+ */
+function patchOf(seen: readonly string[]): string | undefined {
+	return seen.find((call) => call.startsWith("PATCH"));
+}
+
+describe("set", () => {
+	it("sends both mode switches, so switching mode can never leave two on", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", settingsApi(seen));
+
+		const result = await run(["set", "mode", "spa", "--site", "calm-cedar"]);
+
+		expect(result.code).toBe(0);
+		expect(patchOf(seen)).toBe('PATCH /api/sites/01J {"spaMode":true,"docsMode":false}');
+	});
+
+	it("takes a name of several words without quotes", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", settingsApi(seen));
+
+		await run(["set", "name", "Launch", "notes", "--site", "calm-cedar"]);
+
+		expect(patchOf(seen)).toBe('PATCH /api/sites/01J {"name":"Launch notes"}');
+	});
+
+	it("refuses a password typed as an argument, and sends nothing", async () => {
+		// It is in shell history the moment it is typed. Taking it anyway would make that the habit.
+		const fetched = vi.fn(async () => Response.json({}));
+		vi.stubGlobal("fetch", fetched);
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+
+		const result = await run(["set", "password", "hunter22", "--site", "calm-cedar"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("shell history");
+		expect(fetched).not.toHaveBeenCalled();
+	});
+
+	it("will not schedule a deletion without --yes", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", settingsApi(seen));
+
+		const result = await run([
+			"set",
+			"expires",
+			"2030-01-01T00:00:00Z",
+			"--then",
+			"delete",
+			"--site",
+			"calm-cedar",
+		]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("calm-cedar");
+		expect(result.text).toContain("--yes");
+		expect(patchOf(seen)).toBeUndefined();
+	});
+
+	it("schedules the deletion when told twice", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", settingsApi(seen));
+
+		const result = await run([
+			"set",
+			"expires",
+			"2030-01-01T00:00:00Z",
+			"--then",
+			"delete",
+			"--site",
+			"calm-cedar",
+			"--yes",
+		]);
+
+		expect(result.code).toBe(0);
+		expect(patchOf(seen)).toBe(
+			'PATCH /api/sites/01J {"expiresAt":"2030-01-01T00:00:00Z","expiryAction":"delete"}',
+		);
+	});
+
+	it("answers an unknown setting without a token, listing the ones there are", async () => {
+		const result = await run(["set", "colour", "blue"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("mode static|spa|docs");
+		expect(result.text).not.toContain("DROP2RUN_TOKEN");
+	});
+
+	it("refuses --then on anything but expires", async () => {
+		const result = await run(["set", "mode", "spa", "--then", "delete"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("set expires");
+	});
+});
+
+describe("set password", () => {
+	it("asks for the password only once the site is known to exist", async () => {
+		// A mistyped subdomain should fail before somebody types a password into nothing.
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ sites: [] })),
+		);
+		const asked = vi.fn(async () => "secret-password");
+
+		const result = await set("no-such-site", "password", [], { confirmed: false }, asked);
+
+		expect(result.code).toBe(1);
+		expect(asked).not.toHaveBeenCalled();
+	});
+
+	it("sends what was typed", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", settingsApi(seen));
+
+		const result = await set(
+			"calm-cedar",
+			"password",
+			[],
+			{ confirmed: false },
+			async () => "secret-password",
+		);
+
+		expect(result.code).toBe(0);
+		expect(patchOf(seen)).toBe('PATCH /api/sites/01J {"password":"secret-password"}');
+	});
+
+	it("refuses an empty one rather than reading it as removing the password", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", settingsApi(seen));
+
+		const result = await set("calm-cedar", "password", [], { confirmed: false }, async () => "");
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("unset password");
+		expect(patchOf(seen)).toBeUndefined();
+	});
+});
+
+describe("unset", () => {
+	it("clears with an empty string, which the API reads as clear rather than leave alone", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", settingsApi(seen));
+
+		const result = await run(["unset", "password", "--site", "calm-cedar"]);
+
+		expect(result.code).toBe(0);
+		expect(patchOf(seen)).toBe('PATCH /api/sites/01J {"password":""}');
+	});
+
+	it("knows nothing on the object prototype", async () => {
+		const result = await run(["unset", "toString", "--site", "calm-cedar"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("`unset` clears");
+	});
+});
+
+describe("pause", () => {
+	it("reports the state in lowercase, whatever spelling the API used", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", settingsApi(seen));
+
+		const result = await run(["pause", "calm-cedar", "--json"]);
+
+		expect(result.code).toBe(0);
+		expect(seen).toContain("POST /api/sites/01J/pause");
+		expect(JSON.parse(result.text)).toMatchObject({ status: "paused" });
+	});
+});
+
+describe("readSecret", () => {
+	it("reads piped input whole, dropping only the newline echo added", async () => {
+		/**
+		 * Yields the chunks a pipe would deliver.
+		 *
+		 * @yields Each chunk.
+		 */
+		async function* chunks() {
+			yield "two words ";
+			yield "here\n";
+		}
+		const piped = Object.assign(chunks(), {
+			isTTY: false,
+			resume: () => {},
+			pause: () => {},
+			setEncoding: () => {},
+			on: () => {},
+			off: () => {},
+		});
+
+		expect(await readSecret("unused", piped, { write: () => {} })).toBe("two words here");
 	});
 });

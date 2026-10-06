@@ -183,6 +183,248 @@ export async function promoteDeploy(
 	);
 }
 
+/** One published version of a site, as its detail lists it. */
+export interface SiteVersion {
+	/** ULID of the deploy, which a rollback takes. */
+	readonly deployId: string;
+	/** Where the deploy got to: `ready` for one that finished, otherwise how far it got. */
+	readonly status: string;
+	/** How many files it carries. */
+	readonly fileCount: number;
+	/** How many bytes they add up to. */
+	readonly totalBytes: number;
+	/** When it was started. */
+	readonly createdAt: string;
+	/** When it finished, or null when it never did. */
+	readonly completedAt: string | null;
+	/** Whether its files are still stored, which is what decides whether it can be rolled back to. */
+	readonly filesKept: boolean;
+}
+
+/**
+ * One of the caller's sites with every setting the dashboard's settings panel shows.
+ *
+ * A subset of what `GET /sites/{id}` answers: the fields a terminal or a chat can act on. The ones left
+ * out — analytics windows, editor availability, the custom-domain allowance — describe screens this
+ * package has no equivalent of.
+ */
+export interface SiteDetail extends SiteSummary {
+	/** `active`, `paused`, or a state the platform put it in, such as `suspended`. */
+	readonly status: string;
+	/** ULID of the deploy being served, or null when nothing has been published. */
+	readonly liveDeployId: string | null;
+	/** Whether an unmatched path falls back to index.html. */
+	readonly spaMode: boolean;
+	/** Whether the site is read through the documents viewer. */
+	readonly docsMode: boolean;
+	/** Whether the owner chose the mode, rather than detection choosing it on each publish. */
+	readonly modeIsManual: boolean;
+	/** Whether a visitor has to type a password first. */
+	readonly passwordProtected: boolean;
+	/** Whether the plan allows a password at all. */
+	readonly passwordProtectionAvailable: boolean;
+	/** Whether the site's hostnames accept form submissions. */
+	readonly formsEnabled: boolean;
+	/** Whether the plan allows forms at all. */
+	readonly formsAvailable: boolean;
+	/** When the site is scheduled to come down, or null. */
+	readonly expiresAt: string | null;
+	/** What happens then: `pause` or `delete`. */
+	readonly expiryAction: string;
+	/** Whether the plan allows scheduling a takedown at all. */
+	readonly scheduledExpiryAvailable: boolean;
+	/** The folder it is filed in, or null at the top level. */
+	readonly folderId: string | null;
+	/** Its versions, newest first. */
+	readonly deploys: readonly SiteVersion[];
+}
+
+/**
+ * Reads one site's settings, state and versions.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @returns The site as it now stands.
+ * @throws Error carrying the API's own wording when it refuses.
+ */
+export async function getSite(credentials: Credentials, siteId: string): Promise<SiteDetail> {
+	const site = await call<SiteDetail>(credentials, `sites/${encodeURIComponent(siteId)}`);
+
+	return {
+		siteId: site.siteId,
+		subdomain: site.subdomain,
+		url: site.url,
+		name: site.name,
+		// Lowercased here because the API sends the enum's own spelling (`Active`, `Pause`) on these two
+		// while deploy statuses arrive lowercase, and a caller comparing against one spelling should not
+		// have to know which field uses which.
+		status: site.status.toLowerCase(),
+		liveDeployId: site.liveDeployId,
+		spaMode: site.spaMode,
+		docsMode: site.docsMode,
+		modeIsManual: site.modeIsManual,
+		passwordProtected: site.passwordProtected,
+		passwordProtectionAvailable: site.passwordProtectionAvailable,
+		formsEnabled: site.formsEnabled,
+		formsAvailable: site.formsAvailable,
+		expiresAt: site.expiresAt,
+		expiryAction: site.expiryAction.toLowerCase(),
+		scheduledExpiryAvailable: site.scheduledExpiryAvailable,
+		folderId: site.folderId,
+		deploys: site.deploys.map((deploy) => ({
+			deployId: deploy.deployId,
+			status: deploy.status,
+			fileCount: deploy.fileCount,
+			totalBytes: deploy.totalBytes,
+			createdAt: deploy.createdAt,
+			completedAt: deploy.completedAt,
+			filesKept: deploy.filesKept,
+		})),
+	};
+}
+
+/** How a site serves its files. */
+export type ServingMode = "static" | "spa" | "docs";
+
+/**
+ * The settings one update may change. Every field is optional, and an absent one is left alone.
+ *
+ * <b>Empty means "clear".</b> `name`, `password` and `expiresAt` take an empty string to remove what is
+ * there, because the API keeps null for "not sent". `folderId` takes `root` for the same reason.
+ *
+ * `undefined` is accepted explicitly so a caller can pass its own optional arguments straight through;
+ * it means the same as leaving the field out.
+ */
+export interface SiteSettingsChange {
+	/** What to call the site, or empty to clear it. */
+	readonly name?: string | undefined;
+	/** How it serves. Sent as both of the API's mode switches, since only one may be on. */
+	readonly mode?: ServingMode | undefined;
+	/** The password a visitor must type, or empty to make the site public. */
+	readonly password?: string | undefined;
+	/** When the site should come down, as an ISO 8601 instant, or empty to cancel. */
+	readonly expiresAt?: string | undefined;
+	/** What the takedown does: `pause` keeps the files, `delete` removes the site. */
+	readonly expiryAction?: "pause" | "delete" | undefined;
+	/** Whether the site accepts form submissions. */
+	readonly formsEnabled?: boolean | undefined;
+	/** The folder to file it in, already resolved to an id, or `root` for the top level. */
+	readonly folderId?: string | undefined;
+}
+
+/** A site's settings after an update, as the API reports them. */
+export interface SiteSettings {
+	/** ULID of the site. */
+	readonly siteId: string;
+	/** Its name, or null. */
+	readonly name: string | null;
+	/** Whether an unmatched path falls back to index.html. */
+	readonly spaMode: boolean;
+	/** Whether the site is read through the documents viewer. */
+	readonly docsMode: boolean;
+	/** Whether something is live, which decides whether the change reached the edge yet. */
+	readonly live: boolean;
+	/** Whether a visitor has to type a password first. */
+	readonly passwordProtected: boolean;
+	/** When the site comes down, or null. */
+	readonly expiresAt: string | null;
+	/** What happens then. */
+	readonly expiryAction: string;
+	/** Whether the site accepts form submissions. */
+	readonly formsEnabled: boolean;
+	/** The folder it is filed in, or null. */
+	readonly folderId: string | null;
+}
+
+/**
+ * Changes a site's settings.
+ *
+ * <b>No rule is checked here.</b> Which plan allows a password, how long one must be, whether a date is
+ * in the future, and who may schedule a deletion are all decided by the server, which says which one
+ * failed in its `detail`. A copy of those rules here would be a second one to keep in step.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param change What to change.
+ * @returns The settings as they now stand.
+ * @throws Error carrying the API's own wording when it refuses, or when nothing was asked to change.
+ */
+export async function updateSiteSettings(
+	credentials: Credentials,
+	siteId: string,
+	change: SiteSettingsChange,
+): Promise<SiteSettings> {
+	const body: Record<string, unknown> = {};
+
+	if (change.name !== undefined) body.name = change.name;
+	if (change.mode !== undefined) {
+		// Both switches, always: the API refuses a body that would leave both on, and switching from
+		// docs to SPA by sending only `spaMode: true` would be exactly that.
+		body.spaMode = change.mode === "spa";
+		body.docsMode = change.mode === "docs";
+	}
+	if (change.password !== undefined) body.password = change.password;
+	if (change.expiresAt !== undefined) body.expiresAt = change.expiresAt;
+	if (change.expiryAction !== undefined) body.expiryAction = change.expiryAction;
+	if (change.formsEnabled !== undefined) body.formsEnabled = change.formsEnabled;
+	if (change.folderId !== undefined) body.folderId = change.folderId;
+
+	if (Object.keys(body).length === 0) throw new Error("Nothing to change — name a setting.");
+
+	const settings = await call<SiteSettings>(credentials, `sites/${encodeURIComponent(siteId)}`, {
+		method: "PATCH",
+		body: JSON.stringify(body),
+	});
+
+	// Lowercased for the reason getSite gives.
+	return { ...settings, expiryAction: settings.expiryAction.toLowerCase() };
+}
+
+/** A site's state after a pause or a resume. */
+export interface SitePauseState {
+	/** ULID of the site. */
+	readonly siteId: string;
+	/** Its subdomain. */
+	readonly subdomain: string;
+	/** `active`, `paused`, or a state the platform put it in. */
+	readonly status: string;
+	/** Whether its owner is the one who paused it. */
+	readonly ownerPaused: boolean;
+}
+
+/**
+ * Takes a site off the air without deleting anything, or puts it back.
+ *
+ * Both directions are idempotent on the server, so a retry after a dropped response converges. Resume
+ * can be refused three ways — a plan with no free site, a past-due account, a site an administrator
+ * suspended — and the API's `detail` says which, so it is passed through rather than reworded.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param action `pause` or `resume`.
+ * @returns The site's state afterwards.
+ * @throws Error carrying the API's own wording when it refuses.
+ */
+export async function setSitePaused(
+	credentials: Credentials,
+	siteId: string,
+	action: "pause" | "resume",
+): Promise<SitePauseState> {
+	const state = await call<SitePauseState>(
+		credentials,
+		`sites/${encodeURIComponent(siteId)}/${action}`,
+		{ method: "POST" },
+	);
+
+	// Lowercased for the reason getSite gives.
+	return {
+		siteId: state.siteId,
+		subdomain: state.subdomain,
+		status: state.status.toLowerCase(),
+		ownerPaused: state.ownerPaused,
+	};
+}
+
 /** One access token, as the listing reports it. */
 export interface AccessToken {
 	/** ULID of the token. */
@@ -417,4 +659,29 @@ export async function resolveFolder(credentials: Credentials, folder: string): P
 		`No folder of yours is called "${folder}". Your folders: ${listed.join(", ")}` +
 			`${more > 0 ? `, and ${more} more` : ""}.`,
 	);
+}
+
+/**
+ * The word that takes a site out of every folder, as both the API and the tools spell it.
+ *
+ * Mirrors `SiteFolderAccess.RootToken` in the API. A folder somebody called "root" cannot be named by
+ * path for that reason, and is reached by its id instead.
+ */
+export const ROOT_FOLDER = "root";
+
+/**
+ * Turns where somebody asked to move a site into what the settings update takes.
+ *
+ * @param credentials Token and base URL.
+ * @param folder A folder path or id, or `root` for the top level.
+ * @returns A folder id, or {@link ROOT_FOLDER}.
+ * @throws Error from {@link resolveFolder} when the folder does not exist.
+ */
+export async function resolveFolderTarget(
+	credentials: Credentials,
+	folder: string,
+): Promise<string> {
+	return folder.trim().toLowerCase() === ROOT_FOLDER
+		? ROOT_FOLDER
+		: await resolveFolder(credentials, folder);
 }

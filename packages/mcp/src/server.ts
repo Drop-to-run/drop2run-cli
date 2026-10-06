@@ -2,21 +2,30 @@ import {
 	type Credentials,
 	deleteSite,
 	describeMode,
+	describeSite,
 	findSite,
+	getSite,
 	listFolders,
 	listSites,
 	loadCredentials,
 	missingCredentialsMessage,
 	type PublishResult,
+	promoteDeploy,
 	publishDirectory,
 	publishFiles,
+	resolveFolderTarget,
+	type SiteDetail,
+	type SiteSettingsChange,
+	servingModeOf,
+	setSitePaused,
+	updateSiteSettings,
 } from "@drop2run/node";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { MAX_WAIT_SECONDS, signInWithBrowser, signInWithCode } from "./auth.js";
 
 /**
- * The MCP surface: five tools that need a token, and two that get one.
+ * The MCP surface: the tools that need a token, and two that get one.
  *
  * <b>Every tool answers, none of them throws at startup.</b> A server with no credential is
  * unconfigured rather than broken, and the difference is what the person sees: a sentence in the chat
@@ -46,7 +55,7 @@ const SERVER_VERSION = "0.8.0";
  * `destructiveHint` is true, so a tool that omits it is read as destructive whether or not it is, and
  * `list_sites` would be confirmed like a publish.
  *
- * `openWorldHint` is true on every one of them: all six talk to dropto.run, and none of them is
+ * `openWorldHint` is true on every one of them: all of them talk to dropto.run, and none of them is
  * answerable from this machine alone.
  */
 
@@ -129,6 +138,120 @@ const REMOVES_A_SITE = {
 	openWorldHint: true,
 } as const;
 
+/**
+ * Changes how a site serves, or whether it does, in a way a later call can put back.
+ *
+ * Destructive because the person's visitors feel it: a password, a pause, a rollback or a scheduled
+ * deletion each change what a URL somebody already has shows. Idempotent because each one sets a state
+ * rather than adding to one — the same call twice leaves the site where the first one did.
+ */
+const CHANGES_A_SITE = {
+	readOnlyHint: false,
+	destructiveHint: true,
+	idempotentHint: true,
+	openWorldHint: true,
+} as const;
+
+/**
+ * Puts a paused site back on the air.
+ *
+ * Not destructive: nothing that was there is replaced, the site returns to serving what it served.
+ */
+const RESTORES_A_SITE = {
+	readOnlyHint: false,
+	destructiveHint: false,
+	idempotentHint: true,
+	openWorldHint: true,
+} as const;
+
+/** `site` on every tool that acts on one existing site. */
+const SITE_INPUT = z.string().min(1).describe("Subdomain or site id, from list_sites.");
+
+/** One version of a site, as `get_site` reports it. */
+const VERSION_OUTPUT = z.object({
+	deployId: z.string().describe("Identifier of the version, which rollback_site takes."),
+	status: z.string().describe("`ready` for a version that finished publishing."),
+	fileCount: z.number().int().describe("How many files it carries."),
+	createdAt: z.string().describe("When it was published, ISO 8601."),
+	filesKept: z
+		.boolean()
+		.describe(
+			"Whether its files are still stored; a version without them cannot be rolled back to.",
+		),
+	live: z.boolean().describe("Whether this is the version being served."),
+});
+
+/** A site's settings, as `get_site` and `update_site` both report them. */
+const SETTINGS_OUTPUT = {
+	siteId: z.string().describe("Identifier of the site."),
+	name: z.string().nullable().describe("What it is called, or null."),
+	mode: z.enum(["static", "spa", "docs"]).describe("How it serves its files."),
+	passwordProtected: z.boolean().describe("Whether visitors must type a password."),
+	formsEnabled: z.boolean().describe("Whether it accepts form submissions."),
+	expiresAt: z.string().nullable().describe("When it is scheduled to come down, or null."),
+	expiryAction: z.string().describe("What the takedown does: `pause` or `delete`."),
+	folderId: z.string().nullable().describe("The folder it is filed in, or null at the top level."),
+};
+
+/** What `pause_site` and `resume_site` report. */
+const PAUSE_OUTPUT = {
+	siteId: z.string().describe("Identifier of the site."),
+	subdomain: z.string().describe("Its subdomain."),
+	status: z.string().describe("`active` or `paused` afterwards."),
+	ownerPaused: z.boolean().describe("Whether the pause is the owner's own."),
+};
+
+/**
+ * Looks up the path of the folder a site is filed in, for a description.
+ *
+ * @param credentials Token and base URL.
+ * @param folderId The folder's id, or null.
+ * @returns Its path, or undefined at the top level or when it is not found.
+ */
+async function folderPathOf(
+	credentials: Credentials,
+	folderId: string | null,
+): Promise<string | undefined> {
+	if (folderId === null) return undefined;
+
+	return (await listFolders(credentials)).find((folder) => folder.folderId === folderId)?.path;
+}
+
+/**
+ * A site's detail as `get_site` structures it.
+ *
+ * @param site The site.
+ * @returns The structured answer.
+ */
+function structuredSite(site: SiteDetail): Record<string, unknown> {
+	return {
+		siteId: site.siteId,
+		subdomain: site.subdomain,
+		url: site.url,
+		name: site.name,
+		status: site.status,
+		mode: servingModeOf(site),
+		passwordProtected: site.passwordProtected,
+		formsEnabled: site.formsEnabled,
+		expiresAt: site.expiresAt,
+		expiryAction: site.expiryAction,
+		folderId: site.folderId,
+		available: {
+			password: site.passwordProtectionAvailable,
+			forms: site.formsAvailable,
+			scheduledTakedown: site.scheduledExpiryAvailable,
+		},
+		versions: site.deploys.map((deploy) => ({
+			deployId: deploy.deployId,
+			status: deploy.status,
+			fileCount: deploy.fileCount,
+			createdAt: deploy.createdAt,
+			filesKept: deploy.filesKept,
+			live: deploy.deployId === site.liveDeployId,
+		})),
+	};
+}
+
 /** One site, as `list_sites` reports it. */
 const SITE_OUTPUT = z.object({
 	siteId: z.string().describe("Identifier of the site."),
@@ -159,7 +282,7 @@ const FOLDER_INPUT = z
 	.describe(
 		"Folder to file the new site in, when the person asked for one: its path of names such as " +
 			"Clients/Acme, or its id from list_folders. Only for a new site — do not pass it together " +
-			"with `site`; moving an existing site is done in the dashboard. It never creates a folder: a " +
+			"with `site`; moving an existing site is update_site's `folder`. It never creates a folder: a " +
 			"folder that does not exist is refused with the list of those that do, and nothing is published.",
 	);
 
@@ -307,6 +430,13 @@ export function createServer(): McpServer {
 				"delete_site is permanent and frees the subdomain for anybody to claim. Ask the person for",
 				"the subdomain and pass what they say as `confirm` — do not fill it in from what you already",
 				"know, because being told it is the point of the step.",
+				"",
+				"An existing site's settings are read with get_site and changed with update_site: its name,",
+				"serving mode (static, spa, docs), a password, whether forms accept submissions, a scheduled",
+				"takedown, and its folder. pause_site and resume_site take it off the air and back without",
+				"deleting anything, and rollback_site serves an earlier version from get_site's list. Use",
+				"a password or a date only when the person gave one, and scheduling a deletion asks for",
+				"`confirm` the way delete_site does.",
 			].join("\n"),
 		},
 	);
@@ -565,6 +695,239 @@ export function createServer(): McpServer {
 						: folders.map((folder) => `${folder.path} — ${folder.folderId}`).join("\n");
 
 				return report(text, { folders: folders.map((folder) => ({ ...folder })) });
+			}),
+	);
+
+	server.registerTool(
+		"get_site",
+		{
+			title: "Read a site's settings",
+			description:
+				"Reads one site's settings and state — serving mode, password, forms, scheduled " +
+				"takedown, folder, whether it is paused — and its versions, newest first, with the one " +
+				"being served marked. Also says which settings the account's plan does not include.",
+			inputSchema: { site: SITE_INPUT },
+			outputSchema: {
+				...SETTINGS_OUTPUT,
+				subdomain: z.string().describe("Its subdomain."),
+				url: z.string().describe("Its live URL."),
+				status: z.string().describe("`active`, `paused`, or a state the platform put it in."),
+				available: z
+					.object({
+						password: z.boolean(),
+						forms: z.boolean(),
+						scheduledTakedown: z.boolean(),
+					})
+					.describe("Which settings the account's plan includes."),
+				versions: z.array(VERSION_OUTPUT).describe("Its versions, newest first."),
+			},
+			annotations: READS_ONLY,
+		},
+		({ site }) =>
+			withCredentials(async (credentials) => {
+				const found = await findSite(credentials, site);
+				const detail = await getSite(credentials, found.siteId);
+
+				return report(
+					describeSite(detail, await folderPathOf(credentials, detail.folderId)),
+					structuredSite(detail),
+				);
+			}),
+	);
+
+	server.registerTool(
+		"update_site",
+		{
+			title: "Change a site's settings",
+			description:
+				"Changes one or more settings of an existing site; anything left out stays as it is. " +
+				"Takes effect on every edge within about a minute, without publishing again. Settings " +
+				"the plan does not include are refused with the reason. Only change what the person " +
+				"asked for — never invent a password or a date.",
+			inputSchema: {
+				site: SITE_INPUT,
+				name: z
+					.string()
+					.optional()
+					.describe("What to call the site in the dashboard. An empty string clears it."),
+				mode: z
+					.enum(["static", "spa", "docs"])
+					.optional()
+					.describe(
+						"How the site serves: `static` answers 404 for a missing path, `spa` falls back to " +
+							"index.html for a client-side router, `docs` reads documents through the viewer. " +
+							"Setting it stops the mode being detected on each publish.",
+					),
+				password: z
+					.string()
+					.optional()
+					.describe(
+						"A password visitors must type before seeing the site, as the person gave it. An " +
+							"empty string removes it and makes the site public again.",
+					),
+				forms: z
+					.boolean()
+					.optional()
+					.describe("Whether the site's forms (marked data-drop2run) accept submissions."),
+				expiresAt: z
+					.string()
+					.optional()
+					.describe(
+						"When the site should come down, as an ISO 8601 instant in the future such as " +
+							"2026-12-01T09:00:00Z. An empty string cancels a scheduled takedown.",
+					),
+				expiryAction: z
+					.enum(["pause", "delete"])
+					.optional()
+					.describe(
+						"What the takedown does, read only with `expiresAt`: `pause` (the default) keeps the " +
+							"files and can be resumed; `delete` removes the site and frees its subdomain, " +
+							"and needs `confirm`.",
+					),
+				folder: z
+					.string()
+					.optional()
+					.describe(
+						"Folder to move the site to — a path such as Clients/Acme or an id from " +
+							"list_folders — or `root` for the top level. Never creates a folder.",
+					),
+				confirm: z
+					.string()
+					.optional()
+					.describe(
+						"Required only with `expiryAction: delete`: the site's subdomain, repeated exactly as " +
+							"the person said it. Ask for it rather than filling it in.",
+					),
+			},
+			outputSchema: SETTINGS_OUTPUT,
+			annotations: CHANGES_A_SITE,
+		},
+		({ site, name, mode, password, forms, expiresAt, expiryAction, folder, confirm }) =>
+			withCredentials(async (credentials) => {
+				const found = await findSite(credentials, site);
+
+				if (expiryAction !== undefined && expiresAt === undefined) {
+					throw new Error("`expiryAction` only applies with `expiresAt` — send the date too.");
+				}
+
+				// A scheduled deletion is a deletion with a delay, so it asks what delete_site asks: the
+				// subdomain, told by the person, compared against the site that would actually go.
+				if (
+					expiryAction === "delete" &&
+					confirm?.trim().toLowerCase() !== found.subdomain.toLowerCase()
+				) {
+					throw new Error(
+						`Refusing to schedule ${found.subdomain} for deletion: \`confirm\` said ` +
+							`"${confirm ?? ""}". Repeat the subdomain exactly to go ahead, or use ` +
+							"`expiryAction: pause`, which keeps the files.",
+					);
+				}
+
+				const change: SiteSettingsChange = {
+					name,
+					mode,
+					password,
+					expiresAt,
+					expiryAction,
+					formsEnabled: forms,
+					folderId:
+						folder === undefined ? undefined : await resolveFolderTarget(credentials, folder),
+				};
+				const settings = await updateSiteSettings(credentials, found.siteId, change);
+				const lines = [
+					`Updated ${found.subdomain}.`,
+					`  mode      ${servingModeOf(settings)}`,
+					`  password  ${settings.passwordProtected ? "on" : "off"}`,
+					`  forms     ${settings.formsEnabled ? "on" : "off"}`,
+					`  takedown  ${settings.expiresAt === null ? "none" : `${settings.expiresAt} (${settings.expiryAction})`}`,
+					...(settings.live
+						? ["Reaching every edge takes up to about a minute."]
+						: ["Nothing is published yet, so this applies from the first publish."]),
+				];
+
+				return report(lines.join("\n"), {
+					siteId: settings.siteId,
+					name: settings.name,
+					mode: servingModeOf(settings),
+					passwordProtected: settings.passwordProtected,
+					formsEnabled: settings.formsEnabled,
+					expiresAt: settings.expiresAt,
+					expiryAction: settings.expiryAction,
+					folderId: settings.folderId,
+				});
+			}),
+	);
+
+	server.registerTool(
+		"pause_site",
+		{
+			title: "Pause a site",
+			description:
+				"Takes a site off the air without deleting anything: visitors see that it is paused, and " +
+				"its files, versions and subdomain are kept. resume_site puts it back.",
+			inputSchema: { site: SITE_INPUT },
+			outputSchema: PAUSE_OUTPUT,
+			annotations: CHANGES_A_SITE,
+		},
+		({ site }) =>
+			withCredentials(async (credentials) => {
+				const found = await findSite(credentials, site);
+				const state = await setSitePaused(credentials, found.siteId, "pause");
+
+				return report(
+					`Paused ${state.subdomain}. Its files and subdomain are kept; resume_site puts it back.`,
+					{ ...state },
+				);
+			}),
+	);
+
+	server.registerTool(
+		"resume_site",
+		{
+			title: "Resume a paused site",
+			description:
+				"Puts a paused site back on the air. Refused, with the reason, when the plan has no room " +
+				"for another active site, the account is past due, or the site was suspended by Drop2Run.",
+			inputSchema: { site: SITE_INPUT },
+			outputSchema: PAUSE_OUTPUT,
+			annotations: RESTORES_A_SITE,
+		},
+		({ site }) =>
+			withCredentials(async (credentials) => {
+				const found = await findSite(credentials, site);
+				const state = await setSitePaused(credentials, found.siteId, "resume");
+
+				return report(`${state.subdomain} is back on the air.\n${found.url}`, { ...state });
+			}),
+	);
+
+	server.registerTool(
+		"rollback_site",
+		{
+			title: "Roll a site back",
+			description:
+				"Serves an earlier version of a site again, without publishing anything. get_site lists " +
+				"the versions; one whose files were collected cannot be rolled back to.",
+			inputSchema: {
+				site: SITE_INPUT,
+				deployId: z.string().min(1).describe("The version to serve, from get_site's `versions`."),
+			},
+			outputSchema: {
+				deployId: z.string().describe("The version now being served."),
+				url: z.string().describe("The URL it is served on."),
+			},
+			annotations: CHANGES_A_SITE,
+		},
+		({ site, deployId }) =>
+			withCredentials(async (credentials) => {
+				const found = await findSite(credentials, site);
+				const promoted = await promoteDeploy(credentials, found.siteId, deployId);
+
+				return report(
+					`${found.subdomain} is back on ${promoted.deployId}. Reaching every edge takes up to ` +
+						`about a minute.\n${promoted.url}`,
+					{ deployId: promoted.deployId, url: promoted.url },
+				);
 			}),
 	);
 

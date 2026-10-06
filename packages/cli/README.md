@@ -22,6 +22,11 @@ drop2run init|deploy --folder <path>         File the new site in one of your fo
 drop2run ls                                  List your sites
 drop2run folders                             List your folders, as --folder takes them
 drop2run open [site]                         Open a site in a browser
+drop2run info [site]                         Show a site's settings and versions
+drop2run set <setting> <value> [--site X]    Change one setting
+drop2run unset name|password|expires         Clear a name, a password or a takedown
+drop2run pause [site]                        Take a site off the air, keeping its files
+drop2run resume [site]                       Put a paused site back on the air
 drop2run rollback <deployId> [--site X]      Put an earlier version back live
 drop2run rm <site> --yes                     Delete a site and everything on it
 drop2run token list                          List your access tokens

@@ -3,15 +3,19 @@ import {
 	type CommandResult,
 	deployCommand,
 	folders,
+	info,
 	init,
 	list,
 	login,
 	loginWithDevice,
 	logout,
 	open,
+	pauseOrResume,
 	remove,
 	rollback,
+	set,
 	tokens,
+	unset,
 	where,
 	whoami,
 } from "./commands.js";
@@ -42,6 +46,11 @@ const HELP = `drop2run — publish a static site from the command line
   drop2run ls                                  List your sites
   drop2run folders                             List your folders, as --folder takes them
   drop2run open [site]                         Open a site in a browser
+  drop2run info [site]                         Show a site's settings and versions
+  drop2run set <setting> <value> [--site X]    Change one setting (see Settings below)
+  drop2run unset name|password|expires         Clear a name, a password or a takedown
+  drop2run pause [site]                        Take a site off the air, keeping its files
+  drop2run resume [site]                       Put a paused site back on the air
   drop2run rollback <deployId> [--site X]      Put an earlier version back live
   drop2run rm <site> --yes                     Delete a site and everything on it
   drop2run token list                          List your access tokens
@@ -57,6 +66,22 @@ Flags
                  or a folder id (init and deploy only)
   --device       Sign in by approving a code on another machine
   --yes          Confirm a deletion, which cannot be undone
+  --then X       What \`set expires\` does when the date arrives: pause
+                 (the default, keeps the files) or delete (needs --yes)
+
+Settings
+  set name <text>               What the dashboard calls the site
+  set mode static|spa|docs      static answers 404 for a missing path, spa
+                                falls back to index.html, docs uses the viewer
+  set password                  Typed at a hidden prompt, or piped in:
+                                printf %s "$PW" | drop2run set password
+  set forms on|off              Whether its forms accept submissions
+  set expires <ISO 8601>        Take it down then, e.g. 2026-12-31T09:00:00Z
+  set folder <path|id|root>     Move it to a folder, or root for the top level
+
+  \`set\` and \`unset\` act on --site, else the site in drop2run.json. A
+  setting your plan does not include is refused with the reason, and
+  \`info\` says which ones those are.
 
 Where a site comes from
   --subdomain creates one under the name you give. Otherwise: --site, then
@@ -103,7 +128,7 @@ function flagValue(args: readonly string[], flag: string): string | undefined {
  * Kept as one list because the parser has two questions about a flag — what its value is, and whether
  * the next word belongs to it — and answering them from two lists is how they disagree.
  */
-const VALUE_FLAGS = ["--site", "--subdomain", "--folder"];
+const VALUE_FLAGS = ["--site", "--subdomain", "--folder", "--then"];
 
 /**
  * Pulls out the positional arguments, leaving flags and the values that belong to them behind.
@@ -260,6 +285,16 @@ export async function run(argv: readonly string[]): Promise<CommandResult> {
 		return json ? { ...failed, text: JSON.stringify(failed.json, null, 2) } : failed;
 	}
 
+	// Checked here for the reason `--subdomain` is: a flag typed with no value would otherwise be read
+	// as absent, and the absent case of this one is the pause somebody typed `--then` to avoid.
+	const then = flagValue(argv, "--then");
+	if (argv.includes("--then") && then === undefined) {
+		const message = "`--then` needs a value: `--then pause` or `--then delete`.";
+		const failed = { text: message, json: { error: message }, code: 1 };
+
+		return json ? { ...failed, text: JSON.stringify(failed.json, null, 2) } : failed;
+	}
+
 	const result = await dispatch(
 		command,
 		rest,
@@ -268,6 +303,7 @@ export async function run(argv: readonly string[]): Promise<CommandResult> {
 		argv.includes("--device"),
 		argv.includes("--yes"),
 		{ subdomain, folder },
+		then,
 	);
 
 	return json ? { ...result, text: JSON.stringify(result.json, null, 2) } : result;
@@ -285,6 +321,7 @@ export async function run(argv: readonly string[]): Promise<CommandResult> {
  * @param device Whether `--device` was given, which picks between the two sign-in flows.
  * @param confirmed Whether `--yes` was given, which is the only confirmation a deletion gets.
  * @param newSite Values of `--subdomain` and `--folder`, already checked against the command and `--site`.
+ * @param then Value of `--then`, which only `set expires` reads.
  * @returns The command's result.
  */
 async function dispatch(
@@ -295,6 +332,7 @@ async function dispatch(
 	device: boolean,
 	confirmed: boolean,
 	newSite: NewSite = {},
+	then: string | undefined = undefined,
 ): Promise<CommandResult> {
 	switch (command) {
 		case "login": {
@@ -333,6 +371,17 @@ async function dispatch(
 			return await folders();
 		case "open":
 			return await open(rest[0] ?? site);
+		case "info":
+			return await info(rest[0] ?? site);
+		case "set":
+			// The site comes from `--site` only: the positions after `set` are the setting and its value,
+			// and a name may be several words.
+			return await set(site, rest[0], rest.slice(1), { then, confirmed });
+		case "unset":
+			return await unset(site, rest[0]);
+		case "pause":
+		case "resume":
+			return await pauseOrResume(command, rest[0] ?? site);
 		case "rollback":
 			return await rollback(rest[0], site);
 		case "rm":

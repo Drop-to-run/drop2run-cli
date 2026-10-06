@@ -9,8 +9,10 @@ import {
 	dashboardUrlFor,
 	deleteSite,
 	describeMode,
+	describeSite,
 	exchange,
 	findSite,
+	getSite,
 	listen,
 	listFolders,
 	listSites,
@@ -29,13 +31,20 @@ import {
 	readProject,
 	resolveApiBaseUrl,
 	resolveFolder,
+	resolveFolderTarget,
+	type ServingMode,
+	type SiteSettingsChange,
 	saveToken,
+	servingModeOf,
+	setSitePaused,
 	startDevice,
 	TOKEN_VARIABLE,
+	updateSiteSettings,
 	waitForCallback,
 	writeProject,
 } from "@drop2run/node";
 import { type ProgressWriter, silentProgress } from "./progress.js";
+import { readSecret } from "./secret.js";
 
 /**
  * What each subcommand does, separated from how it was typed.
@@ -666,6 +675,338 @@ export async function open(
 	} catch (error) {
 		return failure(error instanceof Error ? error.message : String(error));
 	}
+}
+
+/**
+ * Picks the site a command acts on: the one named, or the one in the project file.
+ *
+ * @param site Subdomain or site id, or undefined to use the project file.
+ * @param usage How to name a site for this command, for the refusal.
+ * @returns The site's identifier as typed, or a refusal.
+ */
+function siteOr(
+	site: string | undefined,
+	usage: string,
+): { named: string } | { result: CommandResult } {
+	const named = site ?? readProject()?.siteId;
+
+	return named === undefined
+		? {
+				result: failure(
+					`Name the site: \`${usage}\`, or run this in a folder with a ${PROJECT_FILE}.`,
+				),
+			}
+		: { named };
+}
+
+/**
+ * Shows one site's settings, state and versions.
+ *
+ * The question to answer before `set`, `pause` or `rollback`: what is it now, and which version id is
+ * the one to go back to.
+ *
+ * @param site Subdomain or site id, or undefined to use the project file.
+ * @returns The result.
+ */
+export async function info(site: string | undefined): Promise<CommandResult> {
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	const target = siteOr(site, "drop2run info <subdomain>");
+	if ("result" in target) return target.result;
+
+	try {
+		const summary = await findSite(found.credentials, target.named);
+		const detail = await getSite(found.credentials, summary.siteId);
+		const folderPath =
+			detail.folderId === null
+				? undefined
+				: (await listFolders(found.credentials)).find(
+						(folder) => folder.folderId === detail.folderId,
+					)?.path;
+
+		return {
+			text: describeSite(detail, folderPath),
+			json: { ...detail, mode: servingModeOf(detail), folderPath: folderPath ?? null },
+			code: 0,
+		};
+	} catch (error) {
+		return failure(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/**
+ * Takes a site off the air, or puts it back.
+ *
+ * No `--yes` on either: a pause keeps every file, version and the subdomain, and `resume` undoes it.
+ *
+ * @param action `pause` or `resume`.
+ * @param site Subdomain or site id, or undefined to use the project file.
+ * @returns The result.
+ */
+export async function pauseOrResume(
+	action: "pause" | "resume",
+	site: string | undefined,
+): Promise<CommandResult> {
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	const target = siteOr(site, `drop2run ${action} <subdomain>`);
+	if ("result" in target) return target.result;
+
+	try {
+		const summary = await findSite(found.credentials, target.named);
+		const state = await setSitePaused(found.credentials, summary.siteId, action);
+
+		return {
+			text:
+				action === "pause"
+					? `Paused ${state.subdomain}. Its files and subdomain are kept; \`drop2run resume\` puts it back.`
+					: `${state.subdomain} is back on the air.\n${summary.url}`,
+			json: state,
+			code: 0,
+		};
+	} catch (error) {
+		return failure(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/** The settings `set` and `unset` know, and how each is written. */
+const SETTINGS_USAGE = [
+	"  name <text>                 What the dashboard calls the site",
+	"  mode static|spa|docs        How it serves files",
+	"  password                    Read from stdin, or typed at a hidden prompt",
+	"  forms on|off                Whether its forms accept submissions",
+	"  expires <ISO 8601 instant>  When it comes down; add --then delete to delete rather than pause",
+	"  folder <path|id|root>       Which folder it is filed in",
+].join("\n");
+
+/** What a reader of a password is, injectable so a test does not need a terminal. */
+export type PasswordReader = () => Promise<string>;
+
+/**
+ * What `set` was asked to change, before anything that needs the network or a keyboard.
+ *
+ * A folder and a password are named here and filled in later: the folder needs the account's folder
+ * list, and the password is asked for only once the site is known to exist, so a mistyped subdomain
+ * does not cost somebody typing a password into nothing.
+ */
+type ParsedSetting =
+	| { readonly change: SiteSettingsChange }
+	| { readonly folder: string }
+	| { readonly password: true }
+	| { readonly refusal: string };
+
+/**
+ * Turns `set <setting> <value>` into a settings change, or says why it cannot.
+ *
+ * @param setting What to change.
+ * @param values The words after it.
+ * @param then The value of `--then`, for `expires`.
+ * @returns The change, or the refusal to print.
+ */
+function settingChange(
+	setting: string | undefined,
+	values: readonly string[],
+	then: string | undefined,
+): ParsedSetting {
+	// Several words for a name, so `set name Launch notes` needs no quotes.
+	const value = setting === "name" ? values.join(" ").trim() : values[0];
+	const needs = (example: string) => ({
+		refusal: `\`set ${setting}\` needs a value, for example \`drop2run set ${setting} ${example}\`.`,
+	});
+
+	if (then !== undefined && setting !== "expires") {
+		return { refusal: "`--then` only applies to `set expires`." };
+	}
+
+	switch (setting) {
+		case "name":
+			return value ? { change: { name: value } } : needs('"Launch notes"');
+		case "mode":
+			if (value === "static" || value === "spa" || value === "docs") {
+				return { change: { mode: value satisfies ServingMode } };
+			}
+			return { refusal: "`set mode` takes `static`, `spa` or `docs`." };
+		case "forms":
+			if (value === "on" || value === "off") return { change: { formsEnabled: value === "on" } };
+			return { refusal: "`set forms` takes `on` or `off`." };
+		case "password": {
+			if (value !== undefined) {
+				// Refused even though the value is right there: taking it would teach the habit of
+				// typing a password where shell history keeps it.
+				return {
+					refusal:
+						"`set password` does not take the password as an argument, where it would stay in " +
+						"your shell history. Run `drop2run set password` and type it, or pipe it in: " +
+						'`printf %s "$SITE_PASSWORD" | drop2run set password`.',
+				};
+			}
+
+			return { password: true };
+		}
+		case "expires": {
+			if (value === undefined) return needs("2026-12-31T09:00:00Z");
+			if (then !== undefined && then !== "pause" && then !== "delete") {
+				return { refusal: "`--then` takes `pause` or `delete`." };
+			}
+			return {
+				change: {
+					expiresAt: value,
+					...(then === undefined ? {} : { expiryAction: then }),
+				},
+			};
+		}
+		case "folder":
+			return value ? { folder: value } : needs("Clients/Acme");
+		default:
+			return {
+				refusal: `${setting === undefined ? "Name a setting." : `\`${setting}\` is not a setting.`} Settings:\n${SETTINGS_USAGE}`,
+			};
+	}
+}
+
+/**
+ * Changes one setting of a site.
+ *
+ * <b>One setting per run.</b> Each is a different sentence — `set mode spa`, `set expires …` — and a
+ * command that took several would need flags for all of them, which is a second spelling of the same
+ * thing. The API takes them together; the terminal does not need to.
+ *
+ * <b>A scheduled deletion needs `--yes`</b>, for the reason `rm` does: when it falls due the files go
+ * and the subdomain is released, and there is no undo then either.
+ *
+ * @param site Subdomain or site id, or undefined to use the project file.
+ * @param setting What to change.
+ * @param values The words after it.
+ * @param options `--then` for `expires`, and whether `--yes` was given.
+ * @param readPassword Reads the password for `password`; a test passes its own.
+ * @returns The result.
+ */
+export async function set(
+	site: string | undefined,
+	setting: string | undefined,
+	values: readonly string[],
+	options: { readonly then?: string | undefined; readonly confirmed: boolean },
+	readPassword: PasswordReader = () => readSecret("Password for visitors: "),
+): Promise<CommandResult> {
+	// Read before the token, so a mistyped setting is answered without one.
+	const parsed = settingChange(setting, values, options.then);
+	if ("refusal" in parsed) return failure(parsed.refusal);
+
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	const target = siteOr(site, `drop2run set ${setting} … --site <subdomain>`);
+	if ("result" in target) return target.result;
+
+	try {
+		const summary = await findSite(found.credentials, target.named);
+		let change: SiteSettingsChange;
+
+		if ("folder" in parsed) {
+			change = { folderId: await resolveFolderTarget(found.credentials, parsed.folder) };
+		} else if ("password" in parsed) {
+			const password = await readPassword();
+
+			if (password === "") {
+				return failure("No password was given. To remove one, run `drop2run unset password`.");
+			}
+			change = { password };
+		} else {
+			change = parsed.change;
+		}
+
+		if (change.expiryAction === "delete" && !options.confirmed) {
+			return failure(
+				`This would delete ${summary.subdomain} and every version published to it when ` +
+					`${change.expiresAt} arrives, with no way back then.\n` +
+					"Add --yes if that is what you want, or leave out --then to pause it instead.",
+			);
+		}
+
+		return await applied(found.credentials, summary.siteId, summary.subdomain, change);
+	} catch (error) {
+		return failure(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/**
+ * Clears one setting of a site: its name, its password or its scheduled takedown.
+ *
+ * @param site Subdomain or site id, or undefined to use the project file.
+ * @param setting What to clear.
+ * @returns The result.
+ */
+export async function unset(
+	site: string | undefined,
+	setting: string | undefined,
+): Promise<CommandResult> {
+	// Empty strings, which the API reads as "clear" — null would mean "leave alone".
+	// A Map rather than an object literal, so `unset toString` finds nothing instead of a prototype method.
+	const clear = new Map<string, SiteSettingsChange>([
+		["name", { name: "" }],
+		["password", { password: "" }],
+		["expires", { expiresAt: "" }],
+	]);
+	const change = setting === undefined ? undefined : clear.get(setting);
+
+	if (change === undefined) {
+		return failure(
+			"`unset` clears `name`, `password` or `expires`. To file the site at the top level, run " +
+				"`drop2run set folder root`.",
+		);
+	}
+
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	const target = siteOr(site, `drop2run unset ${setting} --site <subdomain>`);
+	if ("result" in target) return target.result;
+
+	try {
+		const summary = await findSite(found.credentials, target.named);
+
+		return await applied(found.credentials, summary.siteId, summary.subdomain, change);
+	} catch (error) {
+		return failure(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/**
+ * Sends a settings change and says what the site is set to now.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param subdomain Its subdomain, for the sentence.
+ * @param change What to change.
+ * @returns The result.
+ */
+async function applied(
+	credentials: Credentials,
+	siteId: string,
+	subdomain: string,
+	change: SiteSettingsChange,
+): Promise<CommandResult> {
+	const settings = await updateSiteSettings(credentials, siteId, change);
+	const takedown =
+		settings.expiresAt === null ? "none" : `${settings.expiresAt} (${settings.expiryAction})`;
+
+	return {
+		text: [
+			`Updated ${subdomain}.`,
+			`  name      ${settings.name ?? "(none)"}`,
+			`  mode      ${servingModeOf(settings)}`,
+			`  password  ${settings.passwordProtected ? "on" : "off"}`,
+			`  forms     ${settings.formsEnabled ? "on" : "off"}`,
+			`  takedown  ${takedown}`,
+			settings.live
+				? "Reaching every edge takes up to about a minute."
+				: "Nothing is published yet, so this applies from the first publish.",
+		].join("\n"),
+		json: { ...settings, mode: servingModeOf(settings) },
+		code: 0,
+	};
 }
 
 /**

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "../src/server.js";
 
 /**
@@ -57,21 +57,29 @@ afterEach(async () => {
 	if (realHome === undefined) delete process.env.HOME;
 	else process.env.HOME = realHome;
 
+	vi.unstubAllGlobals();
+	delete process.env.DROP2RUN_TOKEN;
+
 	await Promise.all(opened.splice(0).map((client) => client.close()));
 });
 
 describe("the tool surface", () => {
-	it("offers exactly the seven tools the README documents", async () => {
+	it("offers exactly the tools the README documents", async () => {
 		const { tools } = await (await connect()).listTools();
 
 		expect(tools.map((tool) => tool.name).sort()).toEqual([
 			"delete_site",
+			"get_site",
 			"list_folders",
 			"list_sites",
 			"login",
 			"login_code",
+			"pause_site",
 			"publish_dir",
 			"publish_files",
+			"resume_site",
+			"rollback_site",
+			"update_site",
 		]);
 	});
 
@@ -316,7 +324,7 @@ describe("what each tool admits it does", () => {
 	});
 
 	it("admits every tool reaches dropto.run", async () => {
-		// None of the five is answerable from this machine alone, so none of them may look local.
+		// None of them is answerable from this machine alone, so none of them may look local.
 		const hints = await annotations();
 
 		for (const [name, hint] of Object.entries(hints)) {
@@ -397,5 +405,149 @@ describe("the version the server reports", () => {
 		const client = await connect();
 
 		expect(client.getServerVersion()?.version).toBe(manifest.version);
+	});
+});
+
+describe("the tools that manage an existing site", () => {
+	/** The tools that act on one site someone already has. */
+	const MANAGING = ["get_site", "update_site", "pause_site", "resume_site", "rollback_site"];
+
+	/**
+	 * Answers the API calls a site-managing tool makes, recording each one.
+	 *
+	 * @param seen Collects `METHOD path body` for every request.
+	 * @returns The fetch stub.
+	 */
+	function stubApi(seen: string[]) {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+
+		return vi.fn(async (input: string | URL, init?: RequestInit) => {
+			const url = new URL(String(input));
+			seen.push(`${init?.method ?? "GET"} ${url.pathname} ${init?.body ?? ""}`.trim());
+
+			if (url.pathname === "/api/sites") {
+				return Response.json({
+					sites: [
+						{
+							siteId: "01J",
+							subdomain: "calm-cedar",
+							url: "https://calm-cedar.dropto.live",
+							name: null,
+						},
+					],
+				});
+			}
+
+			// The settings update answers in the API's own spelling of the enum, which is what the
+			// lowercasing in @drop2run/node is there for.
+			return Response.json({
+				siteId: "01J",
+				name: null,
+				spaMode: false,
+				docsMode: true,
+				live: true,
+				passwordProtected: false,
+				expiresAt: null,
+				expiryAction: "Pause",
+				formsEnabled: false,
+				folderId: null,
+			});
+		});
+	}
+
+	it("requires the site on every one of them, and nothing else on most", async () => {
+		// `site` required is what stops a model from acting on whichever site it last heard about.
+		const { tools } = await (await connect()).listTools();
+
+		for (const name of MANAGING) {
+			const tool = tools.find((candidate) => candidate.name === name);
+
+			expect(tool?.inputSchema.required, name).toContain("site");
+		}
+		expect(
+			tools.find((tool) => tool.name === "rollback_site")?.inputSchema.required?.sort(),
+		).toEqual(["deployId", "site"]);
+		expect(tools.find((tool) => tool.name === "update_site")?.inputSchema.required).toEqual([
+			"site",
+		]);
+	});
+
+	it("marks reading read-only, resuming harmless, and every other change destructive", async () => {
+		// Pause, a password, a rollback and a scheduled deletion all change what a URL somebody already
+		// has shows. Resuming only puts back what was there.
+		const { tools } = await (await connect()).listTools();
+		const hints = Object.fromEntries(tools.map((tool) => [tool.name, tool.annotations ?? {}]));
+
+		expect(hints.get_site?.readOnlyHint).toBe(true);
+		expect(hints.resume_site?.destructiveHint).toBe(false);
+		for (const name of ["update_site", "pause_site", "rollback_site"]) {
+			expect(hints[name]?.destructiveHint, name).toBe(true);
+			expect(hints[name]?.idempotentHint, name).toBe(true);
+		}
+	});
+
+	it("will not schedule a deletion without the subdomain repeated back", async () => {
+		// A deletion with a delay is still a deletion, so it asks what delete_site asks — and refuses
+		// before anything reaches the settings endpoint.
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+
+		const result = await (await connect()).callTool({
+			name: "update_site",
+			arguments: { site: "calm-cedar", expiresAt: "2030-01-01T00:00:00Z", expiryAction: "delete" },
+		});
+
+		expect(result.isError).toBe(true);
+		expect(JSON.stringify(result.content)).toContain("calm-cedar");
+		expect(seen.some((call) => call.startsWith("PATCH"))).toBe(false);
+	});
+
+	it("schedules the deletion once the subdomain is repeated back", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+
+		const result = await (await connect()).callTool({
+			name: "update_site",
+			arguments: {
+				site: "calm-cedar",
+				expiresAt: "2030-01-01T00:00:00Z",
+				expiryAction: "delete",
+				confirm: "calm-cedar",
+			},
+		});
+
+		expect(result.isError).toBeFalsy();
+		expect(seen).toContain(
+			'PATCH /api/sites/01J {"expiresAt":"2030-01-01T00:00:00Z","expiryAction":"delete"}',
+		);
+	});
+
+	it("sends both mode switches, so changing mode cannot leave two on", async () => {
+		// The API refuses `spaMode` and `docsMode` both true. Sending only the one being turned on
+		// would be refused for a site currently in the other mode.
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+
+		const result = await (await connect()).callTool({
+			name: "update_site",
+			arguments: { site: "calm-cedar", mode: "docs" },
+		});
+
+		expect(result.isError).toBeFalsy();
+		expect(seen).toContain('PATCH /api/sites/01J {"spaMode":false,"docsMode":true}');
+		expect(result.structuredContent).toMatchObject({ mode: "docs", expiryAction: "pause" });
+	});
+
+	it("refuses an update that names no setting, before calling the API", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+
+		const result = await (await connect()).callTool({
+			name: "update_site",
+			arguments: { site: "calm-cedar" },
+		});
+
+		expect(result.isError).toBe(true);
+		expect(seen.some((call) => call.startsWith("PATCH"))).toBe(false);
 	});
 });

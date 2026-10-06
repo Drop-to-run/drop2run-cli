@@ -56,6 +56,26 @@
 		{
 			"name": "delete_site",
 			"description": "Takes a site down permanently, including its subdomain. Requires the subdomain repeated back as confirmation."
+		},
+		{
+			"name": "get_site",
+			"description": "Reads a site's settings, whether it is paused, and its versions."
+		},
+		{
+			"name": "update_site",
+			"description": "Changes a site's name, serving mode, password, forms, scheduled takedown or folder."
+		},
+		{
+			"name": "pause_site",
+			"description": "Takes a site off the air without deleting its files or subdomain."
+		},
+		{
+			"name": "resume_site",
+			"description": "Puts a paused site back on the air."
+		},
+		{
+			"name": "rollback_site",
+			"description": "Serves an earlier version of a site again, without publishing anything."
 		}
 	],
 	"compatibility": {
