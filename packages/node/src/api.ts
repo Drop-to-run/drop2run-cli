@@ -64,7 +64,11 @@ export async function findSite(credentials: Credentials, site: string): Promise<
 	const found = await lookUpSite(credentials, site);
 
 	if (found === undefined) {
-		throw new Error(`No site of yours is called "${site}". \`drop2run ls\` shows what exists.`);
+		// Names both ways to list sites: this is shared by the CLI and the MCP server, and a model told to
+		// run a command it has no shell for has been told nothing.
+		throw new Error(
+			`No site of yours is called "${site}". \`drop2run ls\` or the list_sites tool shows what exists.`,
+		);
 	}
 
 	return found;
@@ -238,8 +242,8 @@ export interface SiteDetail extends SiteSummary {
 	readonly formsAvailable: boolean;
 	/** When the site is scheduled to come down, or null. */
 	readonly expiresAt: string | null;
-	/** What happens then: `pause` or `delete`. */
-	readonly expiryAction: string;
+	/** What happens then — `pause` or `delete` — or null when nothing is scheduled. See {@link actionOf}. */
+	readonly expiryAction: string | null;
 	/** Whether the plan allows scheduling a takedown at all. */
 	readonly scheduledExpiryAvailable: boolean;
 	/** The folder it is filed in, or null at the top level. */
@@ -260,6 +264,22 @@ export interface SiteDetail extends SiteSummary {
  */
 function enumName(value: string): string {
 	return value.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+}
+
+/**
+ * Reports what a takedown will do, or null when there is none.
+ *
+ * <b>Null without a date, whatever the API stored.</b> The API keeps the last action after a schedule is
+ * cancelled — production answered `Delete` for a site that had never had a date — and a date set later
+ * without an action gets `Pause` regardless. Reporting the stored word would tell a reader a site is
+ * due to be deleted when nothing is due at all.
+ *
+ * @param expiresAt When the takedown falls due, or null.
+ * @param action The API's spelling of the stored action.
+ * @returns `pause` or `delete`, or null when nothing is scheduled.
+ */
+function actionOf(expiresAt: string | null, action: string): string | null {
+	return expiresAt === null ? null : enumName(action);
 }
 
 /**
@@ -350,7 +370,7 @@ export async function getSite(credentials: Credentials, siteId: string): Promise
 		formsEnabled: site.formsEnabled,
 		formsAvailable: site.formsAvailable,
 		expiresAt: site.expiresAt,
-		expiryAction: enumName(site.expiryAction),
+		expiryAction: actionOf(site.expiresAt, site.expiryAction ?? ""),
 		scheduledExpiryAvailable: site.scheduledExpiryAvailable,
 		folderId,
 		deploys: site.deploys.map((deploy) => ({
@@ -410,8 +430,8 @@ export interface SiteSettings {
 	readonly passwordProtected: boolean;
 	/** When the site comes down, or null. */
 	readonly expiresAt: string | null;
-	/** What happens then. */
-	readonly expiryAction: string;
+	/** What happens then, or null when nothing is scheduled. See {@link actionOf}. */
+	readonly expiryAction: string | null;
 	/** Whether the site accepts form submissions. */
 	readonly formsEnabled: boolean;
 	/** The folder it is filed in, or null. */
@@ -479,7 +499,7 @@ export async function updateSiteSettings(
 
 	return {
 		...settings,
-		expiryAction: enumName(settings.expiryAction),
+		expiryAction: actionOf(settings.expiresAt, settings.expiryAction ?? ""),
 		invitedOnly,
 		replacedInviteOnly: wasInvitedOnly === true && invitedOnly === false,
 	};

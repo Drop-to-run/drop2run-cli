@@ -550,7 +550,35 @@ describe("the tools that manage an existing site", () => {
 
 		expect(result.isError).toBeFalsy();
 		expect(seen).toContain('PATCH /api/sites/01J {"spaMode":false,"docsMode":true}');
-		expect(result.structuredContent).toMatchObject({ mode: "docs", expiryAction: "pause" });
+		expect(result.structuredContent).toMatchObject({ mode: "docs" });
+	});
+
+	it("reports no takedown action when nothing is scheduled, whatever the API stored", async () => {
+		// Production answered `Delete` for a site that had never had a date. Passed through, that reads
+		// as "this site is due to be deleted" to a model deciding what to tell somebody.
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+
+		const result = await (await connect()).callTool({
+			name: "update_site",
+			arguments: { site: "calm-cedar", mode: "docs" },
+		});
+
+		// The stub answers `expiresAt: null` with the stored action `Pause`.
+		expect(result.structuredContent).toMatchObject({ expiresAt: null, expiryAction: null });
+	});
+
+	it("names list_sites, not only a command line, when a site is not found", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+
+		const result = await (await connect()).callTool({
+			name: "get_site",
+			arguments: { site: "no-such-site" },
+		});
+
+		expect(result.isError).toBe(true);
+		expect(JSON.stringify(result.content)).toContain("list_sites");
 	});
 
 	it("refuses an update that names no setting, before calling the API", async () => {

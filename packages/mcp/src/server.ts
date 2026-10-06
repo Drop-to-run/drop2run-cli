@@ -203,7 +203,10 @@ const SETTINGS_OUTPUT = {
 		),
 	formsEnabled: z.boolean().describe("Whether it accepts form submissions."),
 	expiresAt: z.string().nullable().describe("When it is scheduled to come down, or null."),
-	expiryAction: z.string().describe("What the takedown does: `pause` or `delete`."),
+	expiryAction: z
+		.string()
+		.nullable()
+		.describe("What the takedown does: `pause` or `delete`, or null when none is scheduled."),
 	folderId: z.string().nullable().describe("The folder it is filed in, or null at the top level."),
 };
 
