@@ -2,8 +2,10 @@ import { stat } from "node:fs/promises";
 import {
 	type DeploySource,
 	deploy,
+	nestedIndexOf,
 	type ProgressEvent,
 	type ProgressListener,
+	type ServingMode,
 } from "@drop2run/core";
 import { createSite, lookUpSite, resolveFolder, type SiteSummary } from "./api.js";
 import type { Credentials } from "./config.js";
@@ -28,6 +30,43 @@ export interface PublishResult {
 	readonly files: number;
 	/** True when the content was already live, so no version was created. */
 	readonly unchanged: boolean;
+	/**
+	 * How the site is now served, as the server reported it, or null when nothing was published.
+	 *
+	 * Reported because the server decides it from the files, and a folder whose `index.html` sat a level
+	 * down went live as a documents site with nothing in the output to say so.
+	 */
+	readonly mode: ServingMode | null;
+	/**
+	 * The folder holding an `index.html`, when the site went live as documents and a website plainly sits
+	 * a level down in what was published — the mistake to name, with the folder to publish instead.
+	 */
+	readonly nestedIndex: string | null;
+}
+
+/**
+ * How a finished publish is served, said in one line for a terminal or a chat.
+ *
+ * Shared by the CLI and the MCP server so both say the same words the dashboard does. A site that went
+ * live as documents while a website sat a folder down gets the warning instead, with the folder to
+ * publish — an agent reading this can act on it in its next call.
+ *
+ * @param result What the publish returned.
+ * @returns The line, or null when nothing was published and so nothing changed about how it is served.
+ */
+export function describeMode(result: PublishResult): string | null {
+	if (result.mode === null) return null;
+
+	if (result.nestedIndex !== null) {
+		return (
+			`Served as documents: there is no index.html at the top, but ${result.nestedIndex}/index.html is ` +
+			`there. To publish the website, publish the ${result.nestedIndex} folder instead.`
+		);
+	}
+
+	if (result.mode === "docs") return "Served as documents, in the documents reader.";
+	if (result.mode === "spa") return "Served as a single-page app.";
+	return "Served as a static site.";
 }
 
 /**
@@ -136,6 +175,8 @@ export async function publish(
 	let files = 0;
 	let url = target.url;
 	let unchanged = false;
+	let mode: ServingMode | null = null;
+	let paths: readonly string[] = [];
 	let failure: string | null = null;
 	let failureDetail: unknown;
 
@@ -148,7 +189,10 @@ export async function publish(
 			unchanged = true;
 			url = event.url || target.url;
 		}
-		if (event.type === "done") url = event.url;
+		if (event.type === "done") {
+			url = event.url;
+			mode = event.mode;
+		}
 		if (event.type === "error") {
 			failure = event.message;
 			// Kept alongside the message, because the message alone is unactionable for the failure that
@@ -163,7 +207,15 @@ export async function publish(
 		onProgress?.(event);
 	};
 
-	await deploy(source, target.siteId, record, undefined, {
+	// The paths as they are sent, kept so a site that went live as documents can be told which folder
+	// held the website it probably meant. The engine reports stages, not files, so the source is wrapped.
+	const watched: DeploySource = async (signal, onRead) => {
+		const collected = await source(signal, onRead);
+		paths = collected.map((file) => file.path);
+		return collected;
+	};
+
+	await deploy(watched, target.siteId, record, undefined, {
 		baseUrl: credentials.apiBaseUrl,
 		token: credentials.token,
 	}).catch((error: unknown) => {
@@ -179,7 +231,15 @@ export async function publish(
 		throw thrown;
 	});
 
-	return { url, siteId: target.siteId, subdomain: target.subdomain, files, unchanged };
+	return {
+		url,
+		siteId: target.siteId,
+		subdomain: target.subdomain,
+		files,
+		unchanged,
+		mode,
+		nestedIndex: mode === "docs" ? nestedIndexOf(paths) : null,
+	};
 }
 
 /**

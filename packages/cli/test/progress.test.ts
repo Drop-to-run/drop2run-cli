@@ -51,7 +51,15 @@ group("describe", () => {
 
 	it("says nothing for the events that end the deploy", () => {
 		// The command prints the URL from the result it returns. Saying it here too prints it twice.
-		expect(describe({ type: "done", url: "https://x.dropto.live", name: null })).toBeNull();
+		expect(
+			describe({
+				type: "done",
+				url: "https://x.dropto.live",
+				name: null,
+				mode: "static",
+				modeIsManual: false,
+			}),
+		).toBeNull();
 		expect(describe({ type: "unchanged", url: "https://x.dropto.live" })).toBeNull();
 		expect(describe({ type: "error", code: "upload_failed", message: "no" })).toBeNull();
 	});

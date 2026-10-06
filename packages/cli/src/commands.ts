@@ -8,6 +8,7 @@ import {
 	createSite,
 	dashboardUrlFor,
 	deleteSite,
+	describeMode,
 	exchange,
 	findSite,
 	listen,
@@ -450,9 +451,12 @@ export async function deployCommand(
 		const what = result.unchanged
 			? "Already up to date — nothing needed publishing."
 			: `Published ${result.files.toLocaleString()} ${result.files === 1 ? "file" : "files"}.`;
+		// After the URL, so the address stays on its own line where a script reading the second line of
+		// the output has always found it.
+		const mode = describeMode(result);
 
 		return {
-			text: `${what}\n${result.url}`,
+			text: `${what}\n${result.url}${mode === null ? "" : `\n${mode}`}`,
 			json: result,
 			code: 0,
 		};

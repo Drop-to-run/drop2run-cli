@@ -1,3 +1,5 @@
+import type { ServingMode } from "./limits.js";
+
 /**
  * Types shared across the deploy pipeline.
  *
@@ -57,9 +59,16 @@ export type ProgressEvent =
 	| { type: "completing"; reused: number }
 	/**
 	 * Published. `name` is what the site is called now, or null when it has none — the server's answer,
-	 * not the title the drop offered, since a redeploy leaves an existing name alone.
+	 * not the title the drop offered, since a redeploy leaves an existing name alone. `mode` is how the
+	 * site is now served and `modeIsManual` whether its owner chose that, both as the server reports them.
 	 */
-	| { type: "done"; url: string; name: string | null }
+	| {
+			type: "done";
+			url: string;
+			name: string | null;
+			mode: ServingMode;
+			modeIsManual: boolean;
+	  }
 	/**
 	 * The dropped folder is byte-for-byte what the site already serves, so no version was published.
 	 * A success, not a failure — but a different one from `done`, because nothing changed.

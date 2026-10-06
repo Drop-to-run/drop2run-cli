@@ -1,6 +1,6 @@
 import { type ApiOptions, completeDeploy, prepareDeploy } from "./api.js";
 import { hashAll } from "./hash.js";
-import { checkLimits, type PlanLimits, renameOfLoneHtmlPage } from "./limits.js";
+import { checkLimits, type PlanLimits, renameOfLoneHtmlPage, servingModeOf } from "./limits.js";
 import { readSiteName } from "./title.js";
 import { type CollectedFile, type ProgressListener, sizeOf } from "./types.js";
 import { asDeployError, type UploadDeps, uploadAll } from "./upload.js";
@@ -177,7 +177,13 @@ export async function deploy(
 			await readSiteName(files),
 		);
 
-		onProgress({ type: "done", url: completed.url, name: completed.name });
+		onProgress({
+			type: "done",
+			url: completed.url,
+			name: completed.name,
+			mode: servingModeOf(completed),
+			modeIsManual: completed.modeIsManual,
+		});
 	} catch (error) {
 		const failure = asDeployError(error);
 

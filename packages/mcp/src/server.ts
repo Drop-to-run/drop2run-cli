@@ -1,6 +1,7 @@
 import {
 	type Credentials,
 	deleteSite,
+	describeMode,
 	findSite,
 	listFolders,
 	listSites,
@@ -252,11 +253,14 @@ function describe(result: PublishResult): string {
 		? "Already live — every file matched what the site already serves, so no new version was published."
 		: `Published ${result.files.toLocaleString()} ${result.files === 1 ? "file" : "files"}.`;
 
+	const mode = describeMode(result);
+
 	return [
 		what,
 		"",
 		result.url,
 		"",
+		...(mode === null ? [] : [mode, ""]),
 		`Site ${result.subdomain} (${result.siteId}). Reaching every edge takes up to about a minute.`,
 	].join("\n");
 }

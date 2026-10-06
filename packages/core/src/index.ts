@@ -38,9 +38,13 @@ export {
 	isImageFolder,
 	isViewablePath,
 	MOBILE_WARNING_BYTES,
+	nestedIndexOf,
 	type PlanLimits,
+	predictedModeOf,
 	renameOfLoneHtmlPage,
+	type ServingMode,
 	type SizedFile,
+	servingModeOf,
 	shouldWarnAboutSize,
 	sizeRefusal,
 	totalBytes,
@@ -51,7 +55,9 @@ export {
 	type DropSummary,
 	type FolderSummary,
 	type SummaryEntry,
+	type SummaryFile,
 	summarise,
+	summariseFiles,
 } from "./summary.js";
 export { MAX_NAME_LENGTH, readSiteName, suggestSiteName } from "./title.js";
 export {

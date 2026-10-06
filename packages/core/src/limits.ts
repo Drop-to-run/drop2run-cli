@@ -168,6 +168,79 @@ export function canPublish(paths: readonly string[]): boolean {
 }
 
 /**
+ * How a site's files are served: as they are, as a client-routed app, or through the documents viewer.
+ *
+ * One name for what the API carries as two booleans. The pair has three valid states and a fourth the
+ * server refuses, so a caller holding two independent booleans can express something that does not exist;
+ * a caller holding this cannot.
+ */
+export type ServingMode = "static" | "spa" | "docs";
+
+/**
+ * Reads a site's serving mode out of the two flags the API sends.
+ *
+ * @param flags The site's `spaMode` and `docsMode`, from any response carrying both.
+ * @returns Which of the three modes those flags describe.
+ */
+export function servingModeOf(flags: {
+	readonly spaMode: boolean;
+	readonly docsMode: boolean;
+}): ServingMode {
+	if (flags.docsMode) return "docs";
+	if (flags.spaMode) return "spa";
+	return "static";
+}
+
+/**
+ * The mode the server will give a drop of these paths, when nobody has chosen one by hand.
+ *
+ * ⚠️ Mirrors `SiteModeDetection.IsDocs` in `apps/api`, rule for rule and in the same order: a root
+ * `index.html` (compared exactly, as the server does) makes a website whatever else is there; otherwise a
+ * document at any depth, a folder of pictures, or a single viewable file makes it documents. Never
+ * `spa` — the server never detects that, only an owner chooses it.
+ *
+ * Asked so the confirmation screen can say how a drop will be served before it is uploaded. It used to
+ * say nothing, and a web app whose `index.html` sat one folder too deep went live inside the reader.
+ *
+ * @param paths Normalized manifest paths, as they will be sent.
+ * @returns `static` or `docs`. Meaningful only for a drop {@link canPublish} accepts.
+ */
+export function predictedModeOf(paths: readonly string[]): ServingMode {
+	if (paths.some((path) => path === REQUIRED_INDEX)) return "static";
+	if (paths.some(isDocumentPath)) return "docs";
+	if (isImageFolder(paths)) return "docs";
+	if (paths.length === 1 && paths[0] !== undefined && isViewablePath(paths[0])) return "docs";
+
+	return "static";
+}
+
+/**
+ * The folder holding an `index.html`, when a drop that will be served as documents plainly contains a
+ * website one level or more down.
+ *
+ * The case peeling a wrapper cannot fix: `README.md` beside `dist/index.html`, so there is no single
+ * folder around everything to remove. Without a warning the drop publishes as a documents site whose tree
+ * has the web app as one file in it — the mistake this exists to name before the upload, with the folder
+ * that would have been the site.
+ *
+ * The shallowest candidate wins, then the first by name, so the answer is stable for the same drop.
+ *
+ * @param paths Normalized manifest paths, as they will be sent.
+ * @returns The folder path (no trailing slash), or null when the drop is a website or holds no index.
+ */
+export function nestedIndexOf(paths: readonly string[]): string | null {
+	if (predictedModeOf(paths) !== "docs") return null;
+
+	const suffix = `/${REQUIRED_INDEX}`;
+	const folders = paths
+		.filter((path) => path.endsWith(suffix))
+		.map((path) => path.slice(0, -suffix.length))
+		.sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b));
+
+	return folders[0] ?? null;
+}
+
+/**
  * The name a lone HTML page is about to be published under, when it is not already `index.html`.
  *
  * <b>A single dropped `page.html` is a page, and a page wants to be the site's root.</b> Left alone it

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Credentials } from "../src/config.js";
-import { publishDirectory, publishFiles } from "../src/publish.js";
+import { describeMode, publishDirectory, publishFiles } from "../src/publish.js";
 
 /**
  * Which site a publish goes to, and what the request carries.
@@ -125,7 +125,14 @@ function stubApi(sites: unknown[] = [], folders: unknown[] = []): Recorded[] {
 			if (url.startsWith("https://storage.test/")) return new Response(null, { status: 200 });
 
 			if (url.includes("/complete")) {
-				return Response.json({ url: "https://brave-otter-4f2a.dropto.live", name: "Page" });
+				// The mode the server would decide from the paths sent: documents without a root index.
+				return Response.json({
+					url: "https://brave-otter-4f2a.dropto.live",
+					name: "Page",
+					spaMode: false,
+					docsMode: !paths.includes("index.html"),
+					modeIsManual: false,
+				});
 			}
 
 			throw new Error(`Unexpected request to ${init?.method ?? "GET"} ${url}`);
@@ -164,6 +171,47 @@ describe("publishing with no site named", () => {
 		expect((await publishFiles(credentials, [page])).url).toBe(
 			"https://brave-otter-4f2a.dropto.live",
 		);
+	});
+});
+
+describe("saying how a published site is served", () => {
+	it("reports the mode the server gave it", async () => {
+		stubApi();
+
+		const result = await publishFiles(credentials, [page]);
+
+		expect(result.mode).toBe("static");
+		expect(result.nestedIndex).toBeNull();
+		expect(describeMode(result)).toBe("Served as a static site.");
+	});
+
+	it("names the folder to publish when a website went live as documents", async () => {
+		// The project published instead of its build: a README beside `dist/`. An agent reading the
+		// result can publish the right folder in its next call.
+		stubApi();
+
+		const result = await publishFiles(credentials, [
+			{ path: "README.md", content: "# project" },
+			{ path: "dist/index.html", content: "<h1>site</h1>" },
+		]);
+
+		expect(result.mode).toBe("docs");
+		expect(result.nestedIndex).toBe("dist");
+		expect(describeMode(result)).toMatch(/publish the dist folder instead/);
+	});
+
+	it("says nothing about the mode when nothing was published", () => {
+		expect(
+			describeMode({
+				url: "https://x.dropto.live",
+				siteId: "01J",
+				subdomain: "x",
+				files: 1,
+				unchanged: true,
+				mode: null,
+				nestedIndex: null,
+			}),
+		).toBeNull();
 	});
 });
 

@@ -79,6 +79,17 @@ export interface CompleteResponse {
 	 * This is the one to store.
 	 */
 	readonly name: string | null;
+	/** Whether unmatched paths are answered with the site's `index.html`. */
+	readonly spaMode: boolean;
+	/**
+	 * Whether the site is read through the documents viewer.
+	 *
+	 * The server's decision, from the files this deploy holds — not something to infer from what was
+	 * uploaded. Shown on the finished card so a drop that went live as documents says so.
+	 */
+	readonly docsMode: boolean;
+	/** Whether the owner chose the mode by hand, so no deploy changes it. */
+	readonly modeIsManual: boolean;
 }
 
 /** What the pipeline needs to talk to the API. */

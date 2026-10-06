@@ -69,6 +69,7 @@ export {
 } from "./project.js";
 export {
 	type AuthoredFile,
+	describeMode,
 	type NewSite,
 	type PublishResult,
 	publish,
