@@ -295,9 +295,12 @@ export async function whoami(): Promise<CommandResult> {
 		headers: { Authorization: `Bearer ${found.credentials.token}` },
 	});
 
-	if (!response.ok) {
+	// 204 is how `/me` says nobody is signed in — it answers that rather than 401 so the dashboard's
+	// signed-out page loads stay quiet — and a token the API does not accept arrives as nobody. Read
+	// as success, it crashed here parsing an empty body with a stack trace instead of saying why.
+	if (!response.ok || response.status === 204) {
 		return failure(
-			response.status === 401
+			response.status === 401 || response.status === 204
 				? "This token is not valid any more. It may have been revoked or expired — create another " +
 						"at https://app.dropto.run/account/tokens."
 				: `The API answered ${response.status}.`,

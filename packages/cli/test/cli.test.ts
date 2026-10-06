@@ -273,6 +273,21 @@ describe("whoami", () => {
 		expect(result.text).toContain("not valid any more");
 		expect(result.code).toBe(1);
 	});
+
+	it("reports a token the API does not know as a token problem, not a crash", async () => {
+		// Production answers `/me` with 204 and no body for nobody signed in, which is what a token it
+		// does not accept turns into. This used to reach `response.json()` and print a stack trace.
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => new Response(null, { status: 204 })),
+		);
+
+		const result = await run(["whoami"]);
+
+		expect(result.text).toContain("not valid any more");
+		expect(result.code).toBe(1);
+	});
 });
 
 describe("ls", () => {
