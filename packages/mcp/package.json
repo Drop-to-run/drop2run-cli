@@ -46,14 +46,14 @@
 		"build:mcpb": "node scripts/build-mcpb.mjs"
 	},
 	"dependencies": {
-		"@modelcontextprotocol/sdk": "^1.30.0",
+		"@modelcontextprotocol/sdk": "^1.32.1",
 		"zod": "^4.1.12"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.11",
 		"@types/node": "^26.4.0",
 		"typescript": "^5.9.3",
-		"vitest": "^4.1.11",
-		"vite": "^7.2.1"
+		"vite": "^7.2.1",
+		"vitest": "^4.1.11"
 	}
 }
