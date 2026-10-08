@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import {
 	accessOf,
+	type CommentAudience,
 	type CommentThread,
 	type Credentials,
 	clearToken,
@@ -15,9 +16,11 @@ import {
 	exchange,
 	findSite,
 	getSite,
+	invitePeople,
 	listComments,
 	listen,
 	listFolders,
+	listPeople,
 	listSites,
 	listTokens,
 	loadCredentials,
@@ -32,6 +35,7 @@ import {
 	promoteDeploy,
 	publishDirectory,
 	readProject,
+	removePerson,
 	replyToComment,
 	resolveApiBaseUrl,
 	resolveFolder,
@@ -792,6 +796,8 @@ const SETTINGS_USAGE = [
 	"  forms on|off                Whether its forms accept submissions",
 	"  expires <ISO 8601 instant>  When it comes down; add --then delete to delete rather than pause",
 	"  folder <path|id|root>       Which folder it is filed in",
+	"  invite-only on|off          Whether only the people on its list can open it",
+	"  comments off|invited|anyone Who may comment on its pages",
 ].join("\n");
 
 /** What a reader of a password is, injectable so a test does not need a terminal. */
@@ -882,6 +888,14 @@ function settingChange(
 		}
 		case "folder":
 			return value ? { folder: value } : needs("Clients/Acme");
+		case "invite-only":
+			if (value === "on" || value === "off") return { change: { invitedOnly: value === "on" } };
+			return { refusal: "`set invite-only` takes `on` or `off`." };
+		case "comments":
+			if (value === "off" || value === "invited" || value === "anyone") {
+				return { change: { comments: value satisfies CommentAudience } };
+			}
+			return { refusal: "`set comments` takes `off`, `invited` or `anyone`." };
 		default:
 			return {
 				refusal: `${setting === undefined ? "Name a setting." : `\`${setting}\` is not a setting.`} Settings:\n${SETTINGS_USAGE}`,
@@ -1032,11 +1046,19 @@ async function applied(
 			`  access    ${accessOf(settings)}`,
 			`  mode      ${servingModeOf(settings)}`,
 			`  forms     ${settings.formsEnabled ? "on" : "off"}`,
+			`  comments  ${settings.comments ?? "unknown"}`,
 			`  takedown  ${takedown}`,
 			...(settings.replacedInviteOnly
 				? [
 						"The password replaced invite-only: the people on its list can no longer get in " +
-							"without it. The list is kept for if you switch back in the dashboard.",
+							"without it. The list is kept; `drop2run set invite-only on` switches back.",
+					]
+				: []),
+			// The one combination that reads as on and does nothing, which the API keeps on purpose.
+			...(settings.comments === "invited" && settings.invitedOnly === false
+				? [
+						"Comments are for invited people, but the site is not invite-only, so nobody can comment " +
+							"yet. Run `drop2run set invite-only on`, or `drop2run set comments anyone`.",
 					]
 				: []),
 			settings.live
@@ -1085,6 +1107,130 @@ export async function tokens(): Promise<CommandResult> {
 			.join("\n");
 
 		return { text, json: { tokens: list }, code: 0 };
+	} catch (error) {
+		return failure(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/**
+ * Lists the people on a site's list, and whether the list decides who can open it.
+ *
+ * @param site Subdomain or site id, or undefined to use the project file.
+ * @returns The result.
+ */
+export async function people(site: string | undefined): Promise<CommandResult> {
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	const target = siteOr(site, "drop2run people <subdomain>");
+	if ("result" in target) return target.result;
+
+	try {
+		const summary = await findSite(found.credentials, target.named);
+		const list = await listPeople(found.credentials, summary.siteId);
+		const head =
+			`${list.total} of ${list.limit} on ${summary.subdomain}'s list. ` +
+			(list.invitedOnly
+				? "Only they can open it."
+				: "It is not invite-only, so anybody with the link can open it — `drop2run set invite-only on`.");
+		const rows = list.people.map(
+			(person) =>
+				`${person.email}\t${person.role}${person.owner ? ", owner" : ""}\t${person.status}`,
+		);
+
+		return { text: [head, ...rows].join("\n"), json: list, code: 0 };
+	} catch (error) {
+		return failure(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/**
+ * Puts addresses on a site's list, emailing each one added an invitation.
+ *
+ * The addresses are the person's own words on the command line, so there is no confirmation beyond typing
+ * them; what this adds is saying plainly when the site is not invite-only yet, because then the list does
+ * not decide who can open it and the invitation reads as access it does not grant.
+ *
+ * @param emails The addresses.
+ * @param site Subdomain or site id, or undefined to use the project file.
+ * @param role Value of `--role`: `view` (the default) or `comment`.
+ * @returns The result.
+ */
+export async function invite(
+	emails: readonly string[],
+	site: string | undefined,
+	role: string | undefined,
+): Promise<CommandResult> {
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	if (emails.length === 0)
+		return failure("Name at least one address: `drop2run invite dana@example.com`.");
+	if (role !== undefined && role !== "view" && role !== "comment") {
+		return failure("`--role` is `view` or `comment`.");
+	}
+
+	const target = siteOr(site, "drop2run invite <email> --site <subdomain>");
+	if ("result" in target) return target.result;
+
+	try {
+		const summary = await findSite(found.credentials, target.named);
+		const invited = await invitePeople(
+			found.credentials,
+			summary.siteId,
+			emails,
+			role === "comment" ? "comment" : "view",
+		);
+		const list = await listPeople(found.credentials, summary.siteId);
+
+		return {
+			text: [
+				invited.added.length === 0
+					? `Nobody new on ${summary.subdomain}'s list.`
+					: `Invited ${invited.added.join(", ")} to ${summary.subdomain} — each was emailed.`,
+				...(invited.alreadyListed.length === 0
+					? []
+					: [`Already on the list, not emailed again: ${invited.alreadyListed.join(", ")}.`]),
+				...(list.invitedOnly
+					? []
+					: [
+							"The site is not invite-only yet, so the list does not decide who opens it. " +
+								"`drop2run set invite-only on` does.",
+						]),
+			].join("\n"),
+			json: invited,
+			code: 0,
+		};
+	} catch (error) {
+		return failure(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/**
+ * Takes one address off a site's list.
+ *
+ * @param email The address.
+ * @param site Subdomain or site id, or undefined to use the project file.
+ * @returns The result.
+ */
+export async function uninvite(
+	email: string | undefined,
+	site: string | undefined,
+): Promise<CommandResult> {
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	if (email === undefined)
+		return failure("Name the address: `drop2run uninvite dana@example.com`.");
+
+	const target = siteOr(site, "drop2run uninvite <email> --site <subdomain>");
+	if ("result" in target) return target.result;
+
+	try {
+		const summary = await findSite(found.credentials, target.named);
+		await removePerson(found.credentials, summary.siteId, email);
+
+		return { text: `Removed ${email} from ${summary.subdomain}'s list.`, json: { email }, code: 0 };
 	} catch (error) {
 		return failure(error instanceof Error ? error.message : String(error));
 	}

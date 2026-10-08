@@ -32,6 +32,9 @@ drop2run rm <site> --yes                     Delete a site and everything on it
 drop2run comments [site]                     Read the comments left on a site's pages
 drop2run comments reply <thread> <text>      Answer a thread as the owner [--resolve]
 drop2run comments resolve|reopen <thread>    Resolve a thread, or open it again
+drop2run people [site]                       Who the site is shared with
+drop2run invite <email>... [--role comment]  Share it with people; each is emailed
+drop2run uninvite <email>                    Take someone off the list
 drop2run token list                          List your access tokens
 drop2run whoami                              Check the token and whose it is
 drop2run where                               Show which token source is in use
@@ -39,6 +42,18 @@ drop2run --version                           Print the version
 ```
 
 `--json` on any command prints machine-readable output instead of text.
+
+## Sharing for review
+
+```bash
+drop2run invite dana@example.com --role comment --site calm-cedar   # emailed an invitation
+drop2run set invite-only on --site calm-cedar                        # only the list gets in
+drop2run set comments invited --site calm-cedar                      # the people invited to comment can
+```
+
+`drop2run people` shows the list and `drop2run uninvite` takes someone off it. `set comments anyone` lets
+anybody signed in comment instead, on a site you keep public or behind a password. Both are plan features,
+refused with the reason where the plan lacks them.
 
 ## Comments
 

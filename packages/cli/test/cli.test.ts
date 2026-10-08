@@ -1337,3 +1337,128 @@ describe("comments", () => {
 		expect(seen.filter((call) => call.includes("/comments"))).toEqual([]);
 	});
 });
+
+describe("sharing for review", () => {
+	/**
+	 * Answers the calls the sharing commands make, recording each one.
+	 *
+	 * @param seen Collects `METHOD path?query body` per request.
+	 * @param invitedOnly What the site's list says about invite-only.
+	 */
+	function stubApi(seen: string[], invitedOnly = false): void {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL, init?: RequestInit) => {
+				const url = new URL(String(input));
+				const method = init?.method ?? "GET";
+				seen.push(`${method} ${url.pathname}${url.search} ${init?.body ?? ""}`.trim());
+
+				if (url.pathname === "/api/sites") {
+					return Response.json({
+						sites: [
+							{
+								siteId: "01J",
+								subdomain: "calm-cedar",
+								url: "https://calm-cedar.dropto.live",
+								name: null,
+							},
+						],
+					});
+				}
+				if (url.pathname.endsWith("/viewers") && method === "GET") {
+					return Response.json({
+						invitedOnly,
+						total: 1,
+						limit: 100,
+						viewers: [
+							{ email: "dana@example.com", role: "Comment", owner: false, status: "NotOpened" },
+						],
+					});
+				}
+				if (url.pathname.endsWith("/viewers") && method === "POST") {
+					return Response.json({ added: ["dana@example.com"], alreadyListed: [], total: 1 });
+				}
+				if (url.pathname.endsWith("/viewers") && method === "DELETE") {
+					return Response.json({ email: "dana@example.com", total: 0 });
+				}
+
+				// PATCH /sites/{id}
+				return Response.json({
+					siteId: "01J",
+					name: null,
+					spaMode: false,
+					docsMode: false,
+					live: true,
+					passwordProtected: false,
+					expiresAt: null,
+					expiryAction: "Pause",
+					formsEnabled: false,
+					folderId: null,
+					invitedOnly,
+					commentAudience: "Invited",
+				});
+			}),
+		);
+	}
+
+	it("invites with the role asked for, viewing by default, and says when the list does not decide access", async () => {
+		const seen: string[] = [];
+		stubApi(seen);
+
+		const result = await run([
+			"invite",
+			"dana@example.com",
+			"--role",
+			"comment",
+			"--site",
+			"calm-cedar",
+		]);
+		await run(["invite", "lee@example.com", "--site", "calm-cedar"]);
+
+		expect(result.code).toBe(0);
+		expect(seen).toContain(
+			'POST /api/sites/01J/viewers {"emails":["dana@example.com"],"role":"Comment","notify":true}',
+		);
+		expect(seen).toContain(
+			'POST /api/sites/01J/viewers {"emails":["lee@example.com"],"role":"View","notify":true}',
+		);
+		expect(result.text).toContain("set invite-only on");
+	});
+
+	it("refuses a role it does not know, and an invitation with no address, before calling anything", async () => {
+		const seen: string[] = [];
+		stubApi(seen);
+
+		expect(
+			(await run(["invite", "dana@example.com", "--role", "edit", "--site", "calm-cedar"])).code,
+		).toBe(1);
+		expect((await run(["invite", "--site", "calm-cedar"])).code).toBe(1);
+		expect(seen).toEqual([]);
+	});
+
+	it("turns invite-only and comments on in the API's spelling, and warns about invited comments on a public site", async () => {
+		const seen: string[] = [];
+		stubApi(seen, false);
+
+		await run(["set", "invite-only", "on", "--site", "calm-cedar"]);
+		const comments = await run(["set", "comments", "invited", "--site", "calm-cedar"]);
+
+		expect(seen).toContain('PATCH /api/sites/01J {"invitedOnly":true}');
+		expect(seen).toContain('PATCH /api/sites/01J {"commentAudience":"Invited"}');
+		expect(comments.text).toContain("nobody can comment yet");
+		expect((await run(["set", "comments", "everyone", "--site", "calm-cedar"])).code).toBe(1);
+	});
+
+	it("lists the people and takes one off by address", async () => {
+		const seen: string[] = [];
+		stubApi(seen, true);
+
+		const listed = await run(["people", "calm-cedar"]);
+		await run(["uninvite", "dana@example.com", "--site", "calm-cedar"]);
+
+		expect(listed.text).toContain("Only they can open it.");
+		expect(listed.text).toContain("dana@example.com\tcomment\tnot-opened");
+		expect(seen).toContain("DELETE /api/sites/01J/viewers?email=dana%40example.com");
+	});
+});

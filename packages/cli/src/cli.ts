@@ -7,16 +7,19 @@ import {
 	folders,
 	info,
 	init,
+	invite,
 	list,
 	login,
 	loginWithDevice,
 	logout,
 	open,
 	pauseOrResume,
+	people,
 	remove,
 	rollback,
 	set,
 	tokens,
+	uninvite,
 	unset,
 	where,
 	whoami,
@@ -55,6 +58,9 @@ const HELP = `drop2run — publish a static site from the command line
   drop2run resume [site]                       Put a paused site back on the air
   drop2run rollback <deployId> [--site X]      Put an earlier version back live
   drop2run rm <site> --yes                     Delete a site and everything on it
+  drop2run people [site]                       Who the site is shared with
+  drop2run invite <email>... [--role comment]  Share it with people; each is emailed
+  drop2run uninvite <email>                    Take someone off the list
   drop2run comments [site]                     Read the comments left on a site's pages
   drop2run comments reply <thread> <text>      Answer a thread as the owner [--resolve]
   drop2run comments resolve|reopen <thread>    Resolve a thread, or open it again
@@ -76,6 +82,7 @@ Flags
   --status X     Which comment threads: open (the default), resolved or all
   --path X       Only the comments on one page, such as /pricing
   --resolve      Resolve the thread with the reply (\`comments reply\` only)
+  --role X       What invited people may do: view (the default) or comment
 
 Comments
   \`comments reply\`, \`resolve\` and \`reopen\` act on --site, else the site in
@@ -94,6 +101,11 @@ Settings
   set forms on|off              Whether its forms accept submissions
   set expires <ISO 8601>        Take it down then, e.g. 2026-12-31T09:00:00Z
   set folder <path|id|root>     Move it to a folder, or root for the top level
+  set invite-only on|off        Only the people on its list (\`invite\`) can open it;
+                                replaces a password
+  set comments off|invited|anyone
+                                Who may comment: nobody, people invited to
+                                comment, or anybody signed in
 
   \`set\` and \`unset\` act on --site, else the site in drop2run.json. A
   setting your plan does not include is refused with the reason, and
@@ -144,7 +156,7 @@ function flagValue(args: readonly string[], flag: string): string | undefined {
  * Kept as one list because the parser has two questions about a flag — what its value is, and whether
  * the next word belongs to it — and answering them from two lists is how they disagree.
  */
-const VALUE_FLAGS = ["--site", "--subdomain", "--folder", "--then", "--status", "--path"];
+const VALUE_FLAGS = ["--site", "--subdomain", "--folder", "--then", "--status", "--path", "--role"];
 
 /**
  * Pulls out the positional arguments, leaving flags and the values that belong to them behind.
@@ -331,6 +343,7 @@ export async function run(commandLine: readonly string[]): Promise<CommandResult
 			path: flagValue(argv, "--path"),
 			resolve: argv.includes("--resolve"),
 		},
+		flagValue(argv, "--role"),
 	);
 
 	return json ? { ...result, text: JSON.stringify(result.json, null, 2) } : result;
@@ -362,6 +375,7 @@ async function dispatch(
 	newSite: NewSite = {},
 	then: string | undefined = undefined,
 	commentOptions: CommentOptions = {},
+	role: string | undefined = undefined,
 ): Promise<CommandResult> {
 	switch (command) {
 		case "login": {
@@ -413,6 +427,12 @@ async function dispatch(
 			return await pauseOrResume(command, rest[0] ?? site);
 		case "rollback":
 			return await rollback(rest[0], site);
+		case "people":
+			return await people(rest[0] ?? site);
+		case "invite":
+			return await invite(rest, site, role);
+		case "uninvite":
+			return await uninvite(rest[0], site);
 		case "rm":
 			return await remove(rest[0] ?? site, confirmed);
 		case "comments":
