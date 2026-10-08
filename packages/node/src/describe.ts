@@ -70,6 +70,7 @@ export function describeSite(site: SiteDetail, folderPath?: string): string {
 		`  mode      ${servingModeOf(site)}${site.modeIsManual ? "" : " (detected on each publish)"}`,
 		`  password  ${site.passwordProtected ? "on" : "off"}${unavailable(site.passwordProtectionAvailable)}`,
 		`  forms     ${site.formsEnabled ? "on" : "off"}${unavailable(site.formsAvailable)}`,
+		`  comments  ${site.comments ?? "unknown"}${unavailable(site.commentsAvailable)}`,
 		`  takedown  ${site.expiresAt === null ? "none" : `${site.expiresAt} (${site.expiryAction})`}${unavailable(site.scheduledExpiryAvailable)}`,
 		`  folder    ${site.folderId === null ? "(top level)" : (folderPath ?? site.folderId)}`,
 		"",

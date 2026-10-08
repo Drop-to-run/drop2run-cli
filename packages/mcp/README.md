@@ -88,7 +88,10 @@ lose it.
 | `list_folders` | Lists the account's folders, each with the path `folder` accepts |
 | `delete_site` | Deletes a site permanently, subdomain included — requires the subdomain repeated as `confirm` |
 | `get_site` | Reads a site's settings, whether it is paused, and its versions with the live one marked |
-| `update_site` | Changes a site's name, serving mode, password, forms, scheduled takedown or folder |
+| `update_site` | Changes a site's name, serving mode, password, invite-only, comments, forms, scheduled takedown or folder |
+| `list_people` | Lists who a site is shared with, what each may do, and whether only they can open it |
+| `invite_people` | Invites addresses the person gave — to view, or to view and comment — and emails each one |
+| `remove_person` | Takes one address off a site's list |
 | `pause_site` | Takes a site off the air, keeping its files, versions and subdomain |
 | `resume_site` | Puts a paused site back on the air |
 | `rollback_site` | Serves an earlier version again, by its id from `get_site` |
@@ -116,6 +119,12 @@ that setting, and `folder: "root"` moves the site back to the top level. A taked
 default; `expiryAction: "delete"` removes it instead, and asks for the subdomain as `confirm` the way
 `delete_site` does. Settings your plan does not include are refused with the reason, and `get_site` says
 which ones those are.
+
+To share a site for review, `invite_people` puts the addresses the person gave on its list and emails each
+one; `update_site` with `invitedOnly: true` makes the list the only way in, and `comments` decides who may
+comment — `invited` for the people invited with the comment role, `anyone` for anybody signed in. Both are
+plan features, refused with the reason where the plan lacks them. The tool description tells the model never
+to invite an address the person did not give it.
 
 The comment tools close the loop on a site somebody is reviewing: `list_comments` gives each thread's page
 and the words or element it points at, so the source can be found; after the fix is published,

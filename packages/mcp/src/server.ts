@@ -7,8 +7,10 @@ import {
 	describeSite,
 	findSite,
 	getSite,
+	invitePeople,
 	listComments,
 	listFolders,
+	listPeople,
 	listSites,
 	loadCredentials,
 	missingCredentialsMessage,
@@ -16,6 +18,7 @@ import {
 	promoteDeploy,
 	publishDirectory,
 	publishFiles,
+	removePerson,
 	replyToComment,
 	resolveFolderTarget,
 	type SiteDetail,
@@ -48,7 +51,7 @@ import { MAX_WAIT_SECONDS, signInWithBrowser, signInWithCode } from "./auth.js";
  * release that bumps only the manifest fails before it is published rather than telling every client
  * the wrong version.
  */
-const SERVER_VERSION = "0.10.0";
+const SERVER_VERSION = "0.11.0";
 
 /**
  * How the tools below describe their own effects to a client.
@@ -179,6 +182,20 @@ const ANSWERS_A_COMMENT = {
 	readOnlyHint: false,
 	destructiveHint: false,
 	idempotentHint: false,
+	openWorldHint: true,
+} as const;
+
+/**
+ * Puts people on a site's list and emails them.
+ *
+ * Not destructive: nobody loses anything. Idempotent: an address already listed is reported back and not
+ * emailed again. Open-world in the strongest sense of any tool here — it sends mail to somebody outside the
+ * account, which is why its description insists the addresses come from the person.
+ */
+const INVITES_PEOPLE = {
+	readOnlyHint: false,
+	destructiveHint: false,
+	idempotentHint: true,
 	openWorldHint: true,
 } as const;
 
@@ -338,6 +355,13 @@ const SETTINGS_OUTPUT = {
 				"not mean public.",
 		),
 	formsEnabled: z.boolean().describe("Whether it accepts form submissions."),
+	comments: z
+		.enum(["off", "invited", "anyone"])
+		.nullable()
+		.describe(
+			"Who may comment on its pages: nobody, the people invited to comment (only while it is " +
+				"invite-only), or anybody signed in. Null when that could not be read.",
+		),
 	expiresAt: z.string().nullable().describe("When it is scheduled to come down, or null."),
 	expiryAction: z
 		.string()
@@ -390,10 +414,12 @@ function structuredSite(site: SiteDetail): Record<string, unknown> {
 		expiresAt: site.expiresAt,
 		expiryAction: site.expiryAction,
 		folderId: site.folderId,
+		comments: site.comments,
 		available: {
 			password: site.passwordProtectionAvailable,
 			forms: site.formsAvailable,
 			scheduledTakedown: site.scheduledExpiryAvailable,
+			comments: site.commentsAvailable,
 		},
 		versions: site.deploys.map((deploy) => ({
 			deployId: deploy.deployId,
@@ -591,6 +617,12 @@ export function createServer(): McpServer {
 				"deleting anything, and rollback_site serves an earlier version from get_site's list. Use",
 				"a password or a date only when the person gave one, and scheduling a deletion asks for",
 				"`confirm` the way delete_site does.",
+				"",
+				"To share a site for review: invite_people with the addresses the person gave (each is",
+				"emailed), update_site `invitedOnly: true` so only they can open it, and `comments` to let",
+				"them comment — `invited` for the people invited with the comment role, `anyone` for",
+				"anybody signed in. list_people shows the list; remove_person takes someone off it.",
+				"Never invite an address the person did not give you.",
 				"",
 				"People viewing a site can leave comments pinned to its pages. list_comments reads them,",
 				"with the page and the words each one points at, so the source can be found and changed.",
@@ -879,6 +911,7 @@ export function createServer(): McpServer {
 						password: z.boolean(),
 						forms: z.boolean(),
 						scheduledTakedown: z.boolean(),
+						comments: z.boolean(),
 					})
 					.describe("Which settings the account's plan includes."),
 				versions: z.array(VERSION_OUTPUT).describe("Its versions, newest first."),
@@ -955,6 +988,22 @@ export function createServer(): McpServer {
 						"Folder to move the site to — a path such as Clients/Acme or an id from " +
 							"list_folders — or `root` for the top level. Never creates a folder.",
 					),
+				invitedOnly: z
+					.boolean()
+					.optional()
+					.describe(
+						"True: only the people on the site's list (invite_people) can open it, each signed in. " +
+							"It replaces a password. False: anybody with the link can open it again. Change it " +
+							"only when the person asked who should see the site.",
+					),
+				comments: z
+					.enum(["off", "invited", "anyone"])
+					.optional()
+					.describe(
+						"Who may comment on the site's pages: `off`; `invited` — the people invited with the " +
+							"comment role, on an invite-only site; or `anyone` signed in. Only on plans that " +
+							"include comments.",
+					),
 				confirm: z
 					.string()
 					.optional()
@@ -966,7 +1015,19 @@ export function createServer(): McpServer {
 			outputSchema: SETTINGS_OUTPUT,
 			annotations: CHANGES_A_SITE,
 		},
-		({ site, name, mode, password, forms, expiresAt, expiryAction, folder, confirm }) =>
+		({
+			site,
+			name,
+			mode,
+			password,
+			forms,
+			expiresAt,
+			expiryAction,
+			folder,
+			invitedOnly,
+			comments,
+			confirm,
+		}) =>
 			withCredentials(async (credentials) => {
 				const found = await findSite(credentials, site);
 
@@ -1000,6 +1061,8 @@ export function createServer(): McpServer {
 					formsEnabled: forms,
 					folderId:
 						folder === undefined ? undefined : await resolveFolderTarget(credentials, folder),
+					invitedOnly,
+					comments,
 				};
 				const settings = await updateSiteSettings(credentials, found.siteId, change);
 				const lines = [
@@ -1007,11 +1070,20 @@ export function createServer(): McpServer {
 					`  access    ${accessOf(settings)}`,
 					`  mode      ${servingModeOf(settings)}`,
 					`  forms     ${settings.formsEnabled ? "on" : "off"}`,
+					`  comments  ${settings.comments ?? "unknown"}`,
+					// The one combination that reads as on and does nothing: invited commenters on a site anybody
+					// can open, which the API keeps (it is the owner's choice for when the site goes private).
+					...(settings.comments === "invited" && settings.invitedOnly === false
+						? [
+								"Comments are set to invited people, but the site is not invite-only, so nobody can " +
+									"comment yet. Set `invitedOnly: true`, or `comments: anyone`.",
+							]
+						: []),
 					`  takedown  ${settings.expiresAt === null ? "none" : `${settings.expiresAt} (${settings.expiryAction})`}`,
 					...(settings.replacedInviteOnly
 						? [
 								"The password replaced invite-only: the people on its list can no longer get in " +
-									"without it. The list is kept for switching back in the dashboard.",
+									"without it. The list is kept; `invitedOnly: true` switches back.",
 							]
 						: []),
 					...(settings.live
@@ -1026,6 +1098,7 @@ export function createServer(): McpServer {
 					passwordProtected: settings.passwordProtected,
 					invitedOnly: settings.invitedOnly,
 					formsEnabled: settings.formsEnabled,
+					comments: settings.comments,
 					expiresAt: settings.expiresAt,
 					expiryAction: settings.expiryAction,
 					folderId: settings.folderId,
@@ -1108,6 +1181,137 @@ export function createServer(): McpServer {
 						`about a minute.\n${promoted.url}`,
 					{ deployId: promoted.deployId, url: promoted.url },
 				);
+			}),
+	);
+
+	server.registerTool(
+		"list_people",
+		{
+			title: "List who a site is shared with",
+			description:
+				"Lists the people on a site's list — the ones invite_people added — with what each may do " +
+				"(`view` or `comment`) and whether they have opened it yet. Says whether the list decides " +
+				"who can open the site, which it does only while the site is invite-only.",
+			inputSchema: { site: SITE_INPUT },
+			outputSchema: {
+				invitedOnly: z
+					.boolean()
+					.describe("Whether only the people on the list can open the site now."),
+				total: z.number().int().describe("How many are on the list."),
+				limit: z.number().int().describe("The most the plan allows on one site's list."),
+				people: z.array(
+					z.object({
+						email: z.string(),
+						role: z.string().describe("`view` or `comment`."),
+						owner: z.boolean().describe("Whether this is the site's owner."),
+						status: z.string().describe("`opened` or `not-opened`."),
+					}),
+				),
+			},
+			annotations: READS_ONLY,
+		},
+		({ site }) =>
+			withCredentials(async (credentials) => {
+				const found = await findSite(credentials, site);
+				const list = await listPeople(credentials, found.siteId);
+				const rows = list.people.map(
+					(person) =>
+						`  ${person.email}  ${person.role}${person.owner ? ", owner" : ""}, ${person.status}`,
+				);
+
+				return report(
+					[
+						`${list.total} of ${list.limit} on ${found.subdomain}'s list. ` +
+							(list.invitedOnly
+								? "Only they can open it."
+								: "It is not invite-only, so anybody with the link can open it."),
+						...rows,
+						...(list.total > list.people.length
+							? [`  … and ${list.total - list.people.length} more, in the dashboard`]
+							: []),
+					].join("\n"),
+					{ ...list },
+				);
+			}),
+	);
+
+	server.registerTool(
+		"invite_people",
+		{
+			title: "Invite people to a site",
+			description:
+				"Adds email addresses to a site's list and emails each new one an invitation from the " +
+				"account. Use only addresses the person gave you — never guess, infer or look one up. " +
+				"`comment` lets them comment as well as open it. Inviting does not make the site private; " +
+				"update_site's `invitedOnly: true` does. On plans with private sharing; all or nothing — " +
+				"one bad address, or a list past the plan's limit, adds nobody.",
+			inputSchema: {
+				site: SITE_INPUT,
+				emails: z
+					.array(z.string().min(3))
+					.min(1)
+					.max(50)
+					.describe("The addresses, exactly as the person gave them."),
+				role: z
+					.enum(["view", "comment"])
+					.optional()
+					.describe("`view` (the default) to open the site, `comment` to open it and comment."),
+			},
+			outputSchema: {
+				added: z.array(z.string()).describe("Addresses added and emailed."),
+				alreadyListed: z
+					.array(z.string())
+					.describe("Addresses already on the list, left as they were and not emailed again."),
+				total: z.number().int().describe("How many are on the list now."),
+			},
+			annotations: INVITES_PEOPLE,
+		},
+		({ site, emails, role }) =>
+			withCredentials(async (credentials) => {
+				const found = await findSite(credentials, site);
+				const invited = await invitePeople(credentials, found.siteId, emails, role ?? "view");
+				const detail = await getSite(credentials, found.siteId);
+
+				return report(
+					[
+						invited.added.length === 0
+							? `Nobody new on ${found.subdomain}'s list.`
+							: `Invited ${invited.added.join(", ")} to ${found.subdomain} — each was emailed.`,
+						...(invited.alreadyListed.length === 0
+							? []
+							: [`Already on the list, not emailed again: ${invited.alreadyListed.join(", ")}.`]),
+						...(detail.invitedOnly === false
+							? [
+									"The site is not invite-only yet, so the list does not decide who opens it. " +
+										"update_site with `invitedOnly: true` does.",
+								]
+							: []),
+					].join("\n"),
+					{ ...invited },
+				);
+			}),
+	);
+
+	server.registerTool(
+		"remove_person",
+		{
+			title: "Remove someone from a site's list",
+			description:
+				"Takes one address off a site's list. On an invite-only site their access ends within a " +
+				"minute; putting them back is another invitation, with another email.",
+			inputSchema: {
+				site: SITE_INPUT,
+				email: z.string().min(3).describe("The address to remove, from list_people."),
+			},
+			outputSchema: { email: z.string().describe("The address removed.") },
+			annotations: CHANGES_A_SITE,
+		},
+		({ site, email }) =>
+			withCredentials(async (credentials) => {
+				const found = await findSite(credentials, site);
+				await removePerson(credentials, found.siteId, email);
+
+				return report(`Removed ${email} from ${found.subdomain}'s list.`, { email });
 			}),
 	);
 

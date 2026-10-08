@@ -25,6 +25,8 @@ const SITE: SiteDetail = {
 	expiresAt: null,
 	expiryAction: "pause",
 	scheduledExpiryAvailable: true,
+	comments: "off",
+	commentsAvailable: true,
 	folderId: null,
 	deploys: [
 		{

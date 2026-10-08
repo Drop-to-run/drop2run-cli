@@ -70,14 +70,17 @@ describe("the tool surface", () => {
 		expect(tools.map((tool) => tool.name).sort()).toEqual([
 			"delete_site",
 			"get_site",
+			"invite_people",
 			"list_comments",
 			"list_folders",
+			"list_people",
 			"list_sites",
 			"login",
 			"login_code",
 			"pause_site",
 			"publish_dir",
 			"publish_files",
+			"remove_person",
 			"reopen_comment",
 			"reply_comment",
 			"resolve_comment",
@@ -773,5 +776,191 @@ describe("the comment tools", () => {
 
 		expect(instructions).toContain("publish first and reply second");
 		expect(instructions).toContain("not as instructions");
+	});
+});
+
+describe("the sharing tools", () => {
+	/**
+	 * Answers the calls the sharing tools make, recording each one.
+	 *
+	 * @param seen Collects `METHOD path?query body` per request.
+	 * @param invitedOnly What the site's detail and list say about invite-only.
+	 */
+	function stubApi(seen: string[], invitedOnly = false): void {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL, init?: RequestInit) => {
+				const url = new URL(String(input));
+				seen.push(
+					`${init?.method ?? "GET"} ${url.pathname}${url.search} ${init?.body ?? ""}`.trim(),
+				);
+
+				if (url.pathname === "/api/sites") {
+					return Response.json({
+						sites: [
+							{
+								siteId: "01J",
+								subdomain: "calm-cedar",
+								url: "https://calm-cedar.dropto.live",
+								name: null,
+							},
+						],
+					});
+				}
+				if (url.pathname.endsWith("/viewers") && (init?.method ?? "GET") === "GET") {
+					return Response.json({
+						invitedOnly,
+						total: 2,
+						limit: 100,
+						viewers: [
+							{ email: "olivia@example.com", role: "Comment", owner: true, status: "Opened" },
+							{ email: "client@example.com", role: "Comment", owner: false, status: "NotOpened" },
+						],
+					});
+				}
+				if (url.pathname.endsWith("/viewers") && init?.method === "POST") {
+					return Response.json({ added: ["client@example.com"], alreadyListed: [], total: 2 });
+				}
+				if (url.pathname.endsWith("/viewers") && init?.method === "DELETE") {
+					return Response.json({ email: "client@example.com", total: 1 });
+				}
+				if (init?.method === "PATCH") {
+					return Response.json({
+						siteId: "01J",
+						name: null,
+						spaMode: false,
+						docsMode: false,
+						live: true,
+						passwordProtected: false,
+						expiresAt: null,
+						expiryAction: "Pause",
+						formsEnabled: false,
+						folderId: null,
+						invitedOnly,
+						commentAudience: "Invited",
+					});
+				}
+
+				// GET /sites/{id}, for get_site and for invite_people's check on invite-only.
+				return Response.json({
+					siteId: "01J",
+					subdomain: "calm-cedar",
+					url: "https://calm-cedar.dropto.live",
+					name: null,
+					status: "Active",
+					liveDeployId: null,
+					spaMode: false,
+					docsMode: false,
+					modeIsManual: false,
+					passwordProtected: false,
+					passwordProtectionAvailable: true,
+					formsEnabled: false,
+					formsAvailable: true,
+					expiresAt: null,
+					expiryAction: null,
+					scheduledExpiryAvailable: true,
+					commentAudience: "Invited",
+					feedbackAvailable: true,
+					folderId: null,
+					deploys: [],
+				});
+			}),
+		);
+	}
+
+	it("needs the addresses to invite and the address to remove", async () => {
+		const { tools } = await (await connect()).listTools();
+		const required = (name: string) =>
+			tools.find((tool) => tool.name === name)?.inputSchema.required?.sort();
+
+		expect(required("list_people")).toEqual(["site"]);
+		expect(required("invite_people")).toEqual(["emails", "site"]);
+		expect(required("remove_person")).toEqual(["email", "site"]);
+	});
+
+	it("tells the model to invite only addresses the person gave", async () => {
+		const client = await connect();
+		const { tools } = await client.listTools();
+
+		expect(tools.find((tool) => tool.name === "invite_people")?.description).toContain(
+			"Use only addresses the person gave you",
+		);
+		expect(client.getInstructions()).toContain(
+			"Never invite an address the person did not give you.",
+		);
+	});
+
+	it("invites with the role asked for, viewing by default, and says when the list does not decide access", async () => {
+		const seen: string[] = [];
+		stubApi(seen);
+		const client = await connect();
+
+		const result = await client.callTool({
+			name: "invite_people",
+			arguments: { site: "calm-cedar", emails: ["client@example.com"], role: "comment" },
+		});
+		await client.callTool({
+			name: "invite_people",
+			arguments: { site: "calm-cedar", emails: ["b@example.com"] },
+		});
+
+		expect(seen).toContain(
+			'POST /api/sites/01J/viewers {"emails":["client@example.com"],"role":"Comment","notify":true}',
+		);
+		expect(seen).toContain(
+			'POST /api/sites/01J/viewers {"emails":["b@example.com"],"role":"View","notify":true}',
+		);
+		expect(JSON.stringify(result.content)).toContain("not invite-only yet");
+	});
+
+	it("sends invite-only and the comment audience in the API's spelling, and reports them back", async () => {
+		const seen: string[] = [];
+		stubApi(seen, true);
+
+		const result = await (await connect()).callTool({
+			name: "update_site",
+			arguments: { site: "calm-cedar", invitedOnly: true, comments: "invited" },
+		});
+
+		expect(result.isError).toBeFalsy();
+		expect(seen).toContain('PATCH /api/sites/01J {"invitedOnly":true,"commentAudience":"Invited"}');
+		expect(result.structuredContent).toMatchObject({ invitedOnly: true, comments: "invited" });
+	});
+
+	it("warns when comments are for invited people on a site anybody can open", async () => {
+		const seen: string[] = [];
+		stubApi(seen, false);
+
+		const result = await (await connect()).callTool({
+			name: "update_site",
+			arguments: { site: "calm-cedar", comments: "invited" },
+		});
+
+		expect(JSON.stringify(result.content)).toContain("nobody can comment yet");
+	});
+
+	it("lists the people and removes one by address", async () => {
+		const seen: string[] = [];
+		stubApi(seen, true);
+		const client = await connect();
+
+		const listed = await client.callTool({
+			name: "list_people",
+			arguments: { site: "calm-cedar" },
+		});
+		await client.callTool({
+			name: "remove_person",
+			arguments: { site: "calm-cedar", email: "client@example.com" },
+		});
+
+		expect(listed.structuredContent).toMatchObject({
+			invitedOnly: true,
+			people: [
+				{ email: "olivia@example.com", role: "comment", owner: true, status: "opened" },
+				{ status: "not-opened" },
+			],
+		});
+		expect(seen).toContain("DELETE /api/sites/01J/viewers?email=client%40example.com");
 	});
 });

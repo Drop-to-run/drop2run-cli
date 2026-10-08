@@ -3,7 +3,7 @@
 	"name": "run.dropto/drop2run",
 	"title": "Drop2Run",
 	"description": "Publishes what an AI made — a page, a markdown or PDF doc, or a whole site — to a live HTTPS link.",
-	"version": "0.10.0",
+	"version": "0.11.0",
 	"websiteUrl": "https://dropto.run",
 	"repository": {
 		"url": "https://github.com/Drop-to-run/drop2run-cli",
@@ -21,7 +21,7 @@
 			"registryType": "npm",
 			"registryBaseUrl": "https://registry.npmjs.org",
 			"identifier": "@drop2run/mcp",
-			"version": "0.10.0",
+			"version": "0.11.0",
 			"transport": {
 				"type": "stdio"
 			}

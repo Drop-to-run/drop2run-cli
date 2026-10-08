@@ -246,6 +246,13 @@ export interface SiteDetail extends SiteSummary {
 	readonly expiryAction: string | null;
 	/** Whether the plan allows scheduling a takedown at all. */
 	readonly scheduledExpiryAvailable: boolean;
+	/**
+	 * Who may comment on its pages, or null from an API that predates comments. `invited` takes effect only
+	 * while the site is invite-only.
+	 */
+	readonly comments: CommentAudience | null;
+	/** Whether the plan allows comments at all. */
+	readonly commentsAvailable: boolean;
 	/** The folder it is filed in, or null at the top level. */
 	readonly folderId: string | null;
 	/** Its versions, newest first. */
@@ -340,10 +347,13 @@ async function folderFromListing(
  */
 export async function getSite(credentials: Credentials, siteId: string): Promise<SiteDetail> {
 	const [site, invitedOnly] = await Promise.all([
-		call<Omit<SiteDetail, "folderId"> & { folderId?: string | null }>(
-			credentials,
-			`sites/${encodeURIComponent(siteId)}`,
-		),
+		call<
+			Omit<SiteDetail, "folderId" | "comments" | "commentsAvailable"> & {
+				folderId?: string | null;
+				commentAudience?: string;
+				feedbackAvailable?: boolean;
+			}
+		>(credentials, `sites/${encodeURIComponent(siteId)}`),
 		readInvitedOnly(credentials, siteId),
 	]);
 
@@ -372,6 +382,8 @@ export async function getSite(credentials: Credentials, siteId: string): Promise
 		expiresAt: site.expiresAt,
 		expiryAction: actionOf(site.expiresAt, site.expiryAction ?? ""),
 		scheduledExpiryAvailable: site.scheduledExpiryAvailable,
+		comments: audienceOf(site.commentAudience),
+		commentsAvailable: site.feedbackAvailable === true,
 		folderId,
 		deploys: site.deploys.map((deploy) => ({
 			deployId: deploy.deployId,
@@ -412,7 +424,17 @@ export interface SiteSettingsChange {
 	readonly formsEnabled?: boolean | undefined;
 	/** The folder to file it in, already resolved to an id, or `root` for the top level. */
 	readonly folderId?: string | undefined;
+	/**
+	 * Whether only the people on the site's list can open it. Turning it on replaces a password — a site
+	 * has one way of being private — and turning it off opens the site to anybody with the link.
+	 */
+	readonly invitedOnly?: boolean | undefined;
+	/** Who may comment on its pages: nobody, the people invited to comment, or anybody signed in. */
+	readonly comments?: CommentAudience | undefined;
 }
+
+/** Who may comment on a site's pages, as these tools spell it. */
+export type CommentAudience = "off" | "invited" | "anyone";
 
 /** A site's settings after an update, as the API reports them. */
 export interface SiteSettings {
@@ -438,6 +460,8 @@ export interface SiteSettings {
 	readonly folderId: string | null;
 	/** Whether only invited people can open it, or null from an API that predates sharing. */
 	readonly invitedOnly: boolean | null;
+	/** Who may comment, or null from an API that predates comments. */
+	readonly comments: CommentAudience | null;
 	/**
 	 * Whether this change turned invite-only off by setting a password. The API does that rather than
 	 * refusing — a site has one way of being private — and every invited person loses access with it, so
@@ -478,6 +502,8 @@ export async function updateSiteSettings(
 	if (change.expiryAction !== undefined) body.expiryAction = change.expiryAction;
 	if (change.formsEnabled !== undefined) body.formsEnabled = change.formsEnabled;
 	if (change.folderId !== undefined) body.folderId = change.folderId;
+	if (change.invitedOnly !== undefined) body.invitedOnly = change.invitedOnly;
+	if (change.comments !== undefined) body.commentAudience = API_AUDIENCE[change.comments];
 
 	if (Object.keys(body).length === 0) throw new Error("Nothing to change — name a setting.");
 
@@ -487,9 +513,10 @@ export async function updateSiteSettings(
 			? await readInvitedOnly(credentials, siteId)
 			: null;
 
-	const settings = await call<
-		Omit<SiteSettings, "replacedInviteOnly" | "invitedOnly"> & {
+	const { commentAudience, ...settings } = await call<
+		Omit<SiteSettings, "replacedInviteOnly" | "invitedOnly" | "comments"> & {
 			invitedOnly?: boolean;
+			commentAudience?: string;
 		}
 	>(credentials, `sites/${encodeURIComponent(siteId)}`, {
 		method: "PATCH",
@@ -501,8 +528,28 @@ export async function updateSiteSettings(
 		...settings,
 		expiryAction: actionOf(settings.expiresAt, settings.expiryAction ?? ""),
 		invitedOnly,
+		comments: audienceOf(commentAudience),
 		replacedInviteOnly: wasInvitedOnly === true && invitedOnly === false,
 	};
+}
+
+/** The API's spelling of each comment audience. */
+const API_AUDIENCE: Readonly<Record<CommentAudience, string>> = {
+	off: "Off",
+	invited: "Invited",
+	anyone: "Anyone",
+};
+
+/**
+ * Reads the API's spelling of who may comment, or null for a value this package does not know.
+ *
+ * @param value `Off`, `Invited` or `Anyone`, or undefined from an API that predates comments.
+ * @returns The audience, or null.
+ */
+function audienceOf(value: string | undefined): CommentAudience | null {
+	const lower = value?.toLowerCase();
+
+	return lower === "off" || lower === "invited" || lower === "anyone" ? lower : null;
 }
 
 /** A site's state after a pause or a resume. */
@@ -966,5 +1013,120 @@ export async function setCommentResolved(
 		credentials,
 		`sites/${encodeURIComponent(siteId)}/feedback/threads/${encodeURIComponent(threadId)}/${resolved ? "resolve" : "reopen"}`,
 		{ method: "POST" },
+	);
+}
+
+/** What a person on a site's list may do: open it, or open it and comment. */
+export type PersonRole = "view" | "comment";
+
+/** One person on a site's list. */
+export interface SitePerson {
+	/** Their address — the owner's own list, so it is not hidden here. */
+	readonly email: string;
+	/** `view` or `comment`. */
+	readonly role: string;
+	/** Whether this row is the site's owner. */
+	readonly owner: boolean;
+	/** Whether they have opened the site yet: `opened` or `not-opened`. */
+	readonly status: string;
+}
+
+/** A site's list of people, as one read returns it. */
+export interface SitePeople {
+	/** Whether only the people on the list can open the site now. */
+	readonly invitedOnly: boolean;
+	/** The people, at most a page of them. */
+	readonly people: readonly SitePerson[];
+	/** How many are on the list in all. */
+	readonly total: number;
+	/** The plan's ceiling on the list. */
+	readonly limit: number;
+}
+
+/** Rows read per request: the API's own ceiling on one page of the list. */
+const PEOPLE_PER_REQUEST = 50;
+
+/**
+ * Reads the people on a site's list (`GET /sites/{id}/viewers`), the first page of them.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @returns The list and whether it decides who can open the site.
+ * @throws Error carrying the API's own wording when it refuses.
+ */
+export async function listPeople(credentials: Credentials, siteId: string): Promise<SitePeople> {
+	const page = await call<{
+		invitedOnly: boolean;
+		total: number;
+		limit: number;
+		viewers: { email: string; role: string; owner: boolean; status: string }[];
+	}>(credentials, `sites/${encodeURIComponent(siteId)}/viewers?pageSize=${PEOPLE_PER_REQUEST}`);
+
+	return {
+		invitedOnly: page.invitedOnly,
+		total: page.total,
+		limit: page.limit,
+		people: page.viewers.map((row) => ({
+			email: row.email,
+			role: enumName(row.role),
+			owner: row.owner,
+			status: enumName(row.status),
+		})),
+	};
+}
+
+/** What an invitation did. */
+export interface Invitation {
+	/** The addresses added to the list, each of which was emailed. */
+	readonly added: readonly string[];
+	/** The addresses already on it, left as they were and not emailed again. */
+	readonly alreadyListed: readonly string[];
+	/** How many are on the list now. */
+	readonly total: number;
+}
+
+/**
+ * Puts addresses on a site's list (`POST /sites/{id}/viewers`), and emails each one added an invitation.
+ *
+ * All or nothing on the server: one malformed address, or a batch past the plan's ceiling, adds nobody.
+ * Adding does not make the site invite-only; that is its own setting.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param emails The addresses.
+ * @param role What they may do.
+ * @returns Who was added and who was already there.
+ * @throws Error carrying the API's own wording when it refuses.
+ */
+export async function invitePeople(
+	credentials: Credentials,
+	siteId: string,
+	emails: readonly string[],
+	role: PersonRole,
+): Promise<Invitation> {
+	return await call<Invitation>(credentials, `sites/${encodeURIComponent(siteId)}/viewers`, {
+		method: "POST",
+		body: JSON.stringify({ emails, role: role === "comment" ? "Comment" : "View", notify: true }),
+	});
+}
+
+/**
+ * Takes one address off a site's list (`DELETE /sites/{id}/viewers?email=`). Their access ends within a
+ * minute; putting them back is another invitation.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param email The address.
+ * @throws Error carrying the API's own wording when it refuses.
+ */
+export async function removePerson(
+	credentials: Credentials,
+	siteId: string,
+	email: string,
+): Promise<void> {
+	await call<unknown>(
+		credentials,
+		`sites/${encodeURIComponent(siteId)}/viewers?email=${encodeURIComponent(email)}`,
+		{ method: "DELETE" },
 	);
 }
