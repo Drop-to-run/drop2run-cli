@@ -921,7 +921,7 @@ export async function listComments(
  * Answers a comment thread as the site's owner, and resolves it too when asked.
  *
  * Only the account's owner may; the API refuses anybody else, and refuses when the site's plan or its
- * setting has comments off. The reply is labelled on the page as sent through the API.
+ * setting has comments off. On the page the reply reads as the owner's, as one typed there would.
  *
  * @param credentials Token and base URL.
  * @param siteId ULID of the site.

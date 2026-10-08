@@ -93,7 +93,7 @@ lose it.
 | `resume_site` | Puts a paused site back on the air |
 | `rollback_site` | Serves an earlier version again, by its id from `get_site` |
 | `list_comments` | Reads the comments people left on a site's pages — each thread's page, the words it points at, and every comment in it |
-| `reply_comment` | Answers a comment thread as the site's owner; the reply is labelled on the page and the thread's people are emailed |
+| `reply_comment` | Answers a comment thread as the site's owner; the reply shows under the owner's name and the thread's people are emailed |
 | `resolve_comment` | Marks a comment thread resolved |
 | `reopen_comment` | Opens a resolved comment thread again |
 

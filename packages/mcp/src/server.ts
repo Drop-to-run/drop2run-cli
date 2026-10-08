@@ -1184,8 +1184,8 @@ export function createServer(): McpServer {
 		{
 			title: "Reply to a comment",
 			description:
-				"Answers a comment thread on a site as its owner. The reply shows on the page, labelled as " +
-				"sent through the API, and the people in the thread are emailed. Publish a fix before " +
+				"Answers a comment thread on a site as its owner. The reply shows on the page under the " +
+				"owner's name, and the people in the thread are emailed. Publish a fix before " +
 				"replying that it is fixed. The thread stays open unless `resolve` is true, so the commenter " +
 				"can check and resolve it themselves; resolve only when the person asks. Only the account's " +
 				"owner can reply.",

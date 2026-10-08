@@ -52,7 +52,8 @@ drop2run deploy dist                                           # publish the fix
 drop2run comments reply 01JTHREAD... "Fixed — please check" --site calm-cedar
 ```
 
-The reply shows on the page, labelled as sent through the API, and the people in the thread are emailed.
+The reply shows on the page under your name, as one typed there would, and the people in the thread are
+emailed.
 It leaves the thread open unless `--resolve` is given: a resolved thread stays on the version it was
 opened on, so resolving right after the deploy that fixed it takes it off the live page before its author
 has seen the answer. `comments resolve` and `comments reopen` change a thread's state on its own.

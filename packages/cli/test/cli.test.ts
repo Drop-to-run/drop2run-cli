@@ -1284,7 +1284,7 @@ describe("comments", () => {
 		expect(result.text).toContain('01JTHREAD  /pricing  "free tier"  (earlier version)');
 		// One line per comment, whatever line breaks the commenter typed.
 		expect(result.text).toContain("  Cam: The price is wrong");
-		expect(result.text).toContain("  Olivia (owner, via API): Fixed");
+		expect(result.text).toContain("  Olivia (owner): Fixed");
 	});
 
 	it("refuses a status it does not know before calling anything", async () => {

@@ -1239,12 +1239,7 @@ function describeComments(
 			`${thread.id}  ${thread.path}${where === null ? "" : `  "${where}"`}` +
 				(flags.length === 0 ? "" : `  (${flags.join(", ")})`),
 			...thread.comments.map((comment) => {
-				const tags = [
-					...(comment.author.owner ? ["owner"] : []),
-					...(comment.source === "Api" ? ["via API"] : []),
-				];
-				const who =
-					tags.length === 0 ? comment.author.name : `${comment.author.name} (${tags.join(", ")})`;
+				const who = comment.author.owner ? `${comment.author.name} (owner)` : comment.author.name;
 
 				return `  ${who}: ${comment.body.replace(/\s*\n\s*/g, " ")}`;
 			}),
