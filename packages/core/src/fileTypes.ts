@@ -67,10 +67,12 @@ export interface FileType {
 	/**
 	 * Whether a navigation to this file inside a documents site opens the reader.
 	 *
-	 * Independent of {@link kind}, and the gaps are the interesting part. `.html` is false because a
-	 * customer's page is a page and wrapping it in our chrome would bury it; images are false because
-	 * following a link straight to a `.png` should show the `.png`. Meanwhile `.json` is true, since
-	 * inside a folder of notes a config file is something to read.
+	 * Independent of {@link kind}, and the gaps are the interesting part. Images are false because
+	 * following a link straight to a `.png` should show the `.png`. Source files and `.html` are true:
+	 * a link copied out of the reader's address bar has to open what the person was looking at, and
+	 * the reader shows those as highlighted source and as a framed page. Before that they were false,
+	 * and the same address answered a framed page while browsing and the bare page — or for a `.py`, a
+	 * download — when shared. `?raw` still hands over the file itself.
 	 */
 	readonly reader: boolean;
 	/** Whether the dashboard's editor can open it as text. */
@@ -220,13 +222,14 @@ export const FILE_TYPES: readonly FileType[] = [
 		editable: true,
 	},
 
-	// Source the viewer highlights. A link straight to one of these hands over the file.
+	// Source the viewer highlights. Inside a documents site a link straight to one opens it in the
+	// reader; on an ordinary site, and with `?raw`, it hands over the file.
 	{
 		ext: ".css",
 		mime: "text/css; charset=utf-8",
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: true,
 	},
 	{
@@ -234,7 +237,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: "text/javascript; charset=utf-8",
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: true,
 	},
 	{
@@ -242,7 +245,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -250,7 +253,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -258,7 +261,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -266,20 +269,19 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 
 	// The languages an assistant writes most, beyond the web's own. Same row as `.ts`: shown as source
-	// when somebody opens one in the reader or publishes it on its own, handed over as a file when a
-	// link names it directly, and no media type — adding one changes what a browser does with a
+	// in the reader, handed over as a file with `?raw` or on an ordinary site, and no media type — adding one changes what a browser does with a
 	// published file, which I10 makes a decision of its own rather than a side effect of this list.
 	{
 		ext: ".py",
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -287,7 +289,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -295,7 +297,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -303,7 +305,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -311,7 +313,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -319,7 +321,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -327,7 +329,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -335,7 +337,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -343,7 +345,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -351,7 +353,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -359,7 +361,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -367,7 +369,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -375,7 +377,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -383,7 +385,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: null,
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: false,
 	},
 	{
@@ -391,7 +393,7 @@ export const FILE_TYPES: readonly FileType[] = [
 		mime: "application/xml",
 		kind: "code",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: true,
 	},
 
@@ -464,25 +466,25 @@ export const FILE_TYPES: readonly FileType[] = [
 		editable: false,
 	},
 
-	// A customer's own pages. Never rendered inside the reader.
+	// A customer's own pages. Inside a documents site a navigation opens the reader, which frames the
+	// page; `?raw` and every ordinary site serve the page itself.
 	{
 		ext: ".html",
 		mime: "text/html; charset=utf-8",
 		kind: "html",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: true,
 	},
 	{
-		// ⚠️ No media type, and that is the state of the code rather than a decision: `TYPES` in
-		// `headers.ts` has never held `htm`, so a published `.htm` is served as octet-stream and
-		// downloads instead of rendering. Recorded here rather than fixed, because this table was
-		// introduced as a refactor and a refactor that changes what a URL answers is not one.
+		// An HTML page in every respect the Worker decides by extension: media type, the revalidated
+		// cache policy invariant I7 requires, and the badge's `isHtml`. Missing from `TYPES` it used to
+		// download, which inside the reader meant a frame that downloaded instead of showing a page.
 		ext: ".htm",
-		mime: null,
+		mime: "text/html; charset=utf-8",
 		kind: "html",
 		document: false,
-		reader: false,
+		reader: true,
 		editable: true,
 	},
 
