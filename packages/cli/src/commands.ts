@@ -1109,7 +1109,7 @@ const COMMENTS_USAGE = [
 
 /**
  * Reads a site's comments, or answers, resolves or reopens a thread as its owner
- * (docs/briefs/FEEDBACK-MCP-BRIEF.md §4.6).
+ * (docs/IMPLEMENTATION-PLAN.md §16.7.17).
  *
  * <b>Reading names the site in the same place every other read does</b> — `comments calm-cedar`, like
  * `info calm-cedar` — while the three that act on a thread take it after the subcommand, so they name the

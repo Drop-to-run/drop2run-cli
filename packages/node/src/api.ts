@@ -890,7 +890,7 @@ export interface CommentQuery {
 
 /**
  * Reads a site's comment threads, whole, as the site's account
- * (`GET /sites/{id}/feedback/threads`; docs/briefs/FEEDBACK-MCP-BRIEF.md §4.1).
+ * (`GET /sites/{id}/feedback/threads`; docs/IMPLEMENTATION-PLAN.md §16.7.17).
  *
  * @param credentials Token and base URL.
  * @param siteId ULID of the site.
