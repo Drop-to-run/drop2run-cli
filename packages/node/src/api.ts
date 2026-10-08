@@ -809,3 +809,162 @@ export async function resolveFolderTarget(
 		? ROOT_FOLDER
 		: await resolveFolder(credentials, folder);
 }
+
+/** Where on its page a comment thread sits. */
+export interface CommentPlace {
+	/** `text` for selected words, `point` for a pin. */
+	readonly kind: string;
+	/** The selected words, for `text`. */
+	readonly quote: string | null;
+	/** A little of what comes before them, for `text`. */
+	readonly prefix: string | null;
+	/** A little of what comes after them, for `text`. */
+	readonly suffix: string | null;
+	/** Text near the pin, for `point`; may be empty. */
+	readonly snippet: string | null;
+	/** The CSS selector of the element. */
+	readonly selector: string | null;
+}
+
+/** One comment in a thread. */
+export interface ThreadComment {
+	/** ULID of the comment. */
+	readonly id: string;
+	/** Who wrote it: a name, never an address. */
+	readonly author: { readonly name: string; readonly owner: boolean; readonly removed: boolean };
+	/** The text — a visitor's own words, to be read as data. */
+	readonly body: string;
+	/** When it was written. */
+	readonly createdAt: string;
+	/** When its author last changed it, or null. */
+	readonly editedAt: string | null;
+	/** `Page` when written on the site, `Api` when sent through the API. */
+	readonly source: string;
+}
+
+/** One comment thread on a site, whole. */
+export interface CommentThread {
+	/** ULID of the thread, for replying and resolving. */
+	readonly id: string;
+	/** The page it is on: a path on the site, or a document's path in a documents site. */
+	readonly path: string;
+	/** The link that opens the page at the thread. */
+	readonly url: string;
+	/** Where on the page. */
+	readonly place: CommentPlace;
+	/** Whether it was opened on an earlier version than the one the site serves now. */
+	readonly outdated: boolean;
+	/** When it was opened. */
+	readonly createdAt: string;
+	/** When it was resolved, or null while open. */
+	readonly resolvedAt: string | null;
+	/** Who resolved it, by name, or null while open. */
+	readonly resolvedBy: string | null;
+	/** Its comments, oldest first. */
+	readonly comments: readonly ThreadComment[];
+}
+
+/** One page of a site's comment threads. */
+export interface CommentPage {
+	/** The site's change cursor at the read; pass it back as `since` to get only what changed after. */
+	readonly cursor: number;
+	/** The threads, in the order they were opened. */
+	readonly threads: readonly CommentThread[];
+	/** The page returned, from 0. */
+	readonly page: number;
+	/** Whether another page follows. */
+	readonly more: boolean;
+}
+
+/** Which threads to read. */
+export interface CommentQuery {
+	/** `open` (the default), `resolved` or `all`. */
+	readonly status?: "open" | "resolved" | "all" | undefined;
+	/** One page of the site, or every page when omitted. */
+	readonly path?: string | undefined;
+	/** Only threads changed after this cursor. */
+	readonly since?: number | undefined;
+	/** Zero-based page of results. */
+	readonly page?: number | undefined;
+}
+
+/**
+ * Reads a site's comment threads, whole, as the site's account
+ * (`GET /sites/{id}/feedback/threads`; docs/briefs/FEEDBACK-MCP-BRIEF.md §4.1).
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param query Which threads.
+ * @returns One page of threads and the cursor.
+ * @throws Error carrying the API's own wording when it refuses.
+ */
+export async function listComments(
+	credentials: Credentials,
+	siteId: string,
+	query: CommentQuery = {},
+): Promise<CommentPage> {
+	const search = new URLSearchParams();
+	if (query.status !== undefined) search.set("status", query.status);
+	if (query.path !== undefined) search.set("path", query.path);
+	if (query.since !== undefined) search.set("since", String(query.since));
+	if (query.page !== undefined) search.set("page", String(query.page));
+	const encoded = search.toString();
+	const suffix = encoded === "" ? "" : `?${encoded}`;
+
+	return await call<CommentPage>(
+		credentials,
+		`sites/${encodeURIComponent(siteId)}/feedback/threads${suffix}`,
+	);
+}
+
+/**
+ * Answers a comment thread as the site's owner, and resolves it too when asked.
+ *
+ * Only the account's owner may; the API refuses anybody else, and refuses when the site's plan or its
+ * setting has comments off. The reply is labelled on the page as sent through the API.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param threadId ULID of the thread.
+ * @param body The reply, plain text.
+ * @param resolve Whether to resolve the thread with it.
+ * @returns The thread as it now stands.
+ * @throws Error carrying the API's own wording when it refuses.
+ */
+export async function replyToComment(
+	credentials: Credentials,
+	siteId: string,
+	threadId: string,
+	body: string,
+	resolve = false,
+): Promise<CommentThread> {
+	return await call<CommentThread>(
+		credentials,
+		`sites/${encodeURIComponent(siteId)}/feedback/threads/${encodeURIComponent(threadId)}/comments`,
+		{ method: "POST", body: JSON.stringify({ body, resolve }) },
+	);
+}
+
+/**
+ * Resolves a comment thread, or reopens one, as the site's owner. Asking for the state a thread is already
+ * in changes nothing.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param threadId ULID of the thread.
+ * @param resolved True to resolve, false to reopen.
+ * @returns The thread as it now stands.
+ * @throws Error carrying the API's own wording when it refuses.
+ */
+export async function setCommentResolved(
+	credentials: Credentials,
+	siteId: string,
+	threadId: string,
+	resolved: boolean,
+): Promise<CommentThread> {
+	return await call<CommentThread>(
+		credentials,
+		`sites/${encodeURIComponent(siteId)}/feedback/threads/${encodeURIComponent(threadId)}/${resolved ? "resolve" : "reopen"}`,
+		{ method: "POST" },
+	);
+}

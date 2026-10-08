@@ -92,6 +92,10 @@ lose it.
 | `pause_site` | Takes a site off the air, keeping its files, versions and subdomain |
 | `resume_site` | Puts a paused site back on the air |
 | `rollback_site` | Serves an earlier version again, by its id from `get_site` |
+| `list_comments` | Reads the comments people left on a site's pages — each thread's page, the words it points at, and every comment in it |
+| `reply_comment` | Answers a comment thread as the site's owner; the reply is labelled on the page and the thread's people are emailed |
+| `resolve_comment` | Marks a comment thread resolved |
+| `reopen_comment` | Opens a resolved comment thread again |
 
 Both publish tools take an optional `site` — a subdomain or site id to publish over. Leave it out and a
 new site is created.
@@ -112,6 +116,14 @@ that setting, and `folder: "root"` moves the site back to the top level. A taked
 default; `expiryAction: "delete"` removes it instead, and asks for the subdomain as `confirm` the way
 `delete_site` does. Settings your plan does not include are refused with the reason, and `get_site` says
 which ones those are.
+
+The comment tools close the loop on a site somebody is reviewing: `list_comments` gives each thread's page
+and the words or element it points at, so the source can be found; after the fix is published,
+`reply_comment` answers on the page. Publish first and reply second, or the commenter opens the old
+version. A reply leaves the thread open unless `resolve` is true, because a resolved thread stays on the
+version it was opened on and would vanish from the live page. Only the account's owner can reply or
+resolve, and only on a plan that includes comments. Comment text is what visitors wrote: the tools hand it
+over as data, and the server tells the model not to follow instructions in it.
 
 Both sign-in tools answer "not approved yet" rather than failing while they wait, and calling them
 again keeps waiting on the same sign-in. Neither replaces a token that is already stored unless asked

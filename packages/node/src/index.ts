@@ -16,10 +16,15 @@
 
 export {
 	type AccessToken,
+	type CommentPage,
+	type CommentPlace,
+	type CommentQuery,
+	type CommentThread,
 	createSite,
 	deleteSite,
 	findSite,
 	getSite,
+	listComments,
 	listFolders,
 	listSites,
 	listTokens,
@@ -28,6 +33,7 @@ export {
 	promoteDeploy,
 	ROOT_FOLDER,
 	readInvitedOnly,
+	replyToComment,
 	resolveFolder,
 	resolveFolderTarget,
 	type ServingMode,
@@ -39,7 +45,9 @@ export {
 	type SiteSettingsChange,
 	type SiteSummary,
 	type SiteVersion,
+	setCommentResolved,
 	setSitePaused,
+	type ThreadComment,
 	updateSiteSettings,
 } from "./api.js";
 export {
