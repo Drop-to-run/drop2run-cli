@@ -1225,9 +1225,9 @@ export function createServer(): McpServer {
 		{
 			title: "Resolve a comment thread",
 			description:
-				"Marks a comment thread on a site resolved, as its owner. A resolved thread stays on the " +
-				"version it was opened on, so resolving right after a publish takes it off the live page. " +
-				"reopen_comment undoes it.",
+				"Marks a comment thread on a site resolved, as its owner. It moves from the open threads to " +
+				"the resolved ones of the version the site serves now. Resolve when the person asks; " +
+				"otherwise leave it for the commenter to confirm the fix. reopen_comment undoes it.",
 			inputSchema: { site: SITE_INPUT, thread: THREAD_INPUT },
 			outputSchema: THREAD_OUTPUT.shape,
 			annotations: MARKS_A_THREAD,

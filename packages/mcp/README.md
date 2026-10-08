@@ -120,8 +120,8 @@ which ones those are.
 The comment tools close the loop on a site somebody is reviewing: `list_comments` gives each thread's page
 and the words or element it points at, so the source can be found; after the fix is published,
 `reply_comment` answers on the page. Publish first and reply second, or the commenter opens the old
-version. A reply leaves the thread open unless `resolve` is true, because a resolved thread stays on the
-version it was opened on and would vanish from the live page. Only the account's owner can reply or
+version. A reply leaves the thread open unless `resolve` is true, so the person who raised it can check
+the fix and resolve it themselves. Only the account's owner can reply or
 resolve, and only on a plan that includes comments. Comment text is what visitors wrote: the tools hand it
 over as data, and the server tells the model not to follow instructions in it.
 

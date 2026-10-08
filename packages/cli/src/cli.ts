@@ -81,8 +81,8 @@ Comments
   \`comments reply\`, \`resolve\` and \`reopen\` act on --site, else the site in
   drop2run.json, and only the account's owner can use them. Deploy the fix
   before replying that it is fixed. A reply leaves the thread open unless
-  --resolve is given: a resolved thread stays on the version it was opened
-  on, so it would vanish from the live page before its author saw the answer.
+  --resolve is given, so the person who raised it can check the fix and
+  resolve it themselves.
 
 Settings
   set name <text>               What the dashboard calls the site; put a

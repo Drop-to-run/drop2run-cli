@@ -54,9 +54,8 @@ drop2run comments reply 01JTHREAD... "Fixed — please check" --site calm-cedar
 
 The reply shows on the page under your name, as one typed there would, and the people in the thread are
 emailed.
-It leaves the thread open unless `--resolve` is given: a resolved thread stays on the version it was
-opened on, so resolving right after the deploy that fixed it takes it off the live page before its author
-has seen the answer. `comments resolve` and `comments reopen` change a thread's state on its own.
+It leaves the thread open unless `--resolve` is given, so the person who raised it can check the fix and
+resolve it themselves. `comments resolve` and `comments reopen` change a thread's state on its own.
 
 ## Which site a command acts on
 

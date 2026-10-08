@@ -1115,9 +1115,8 @@ const COMMENTS_USAGE = [
  * `info calm-cedar` — while the three that act on a thread take it after the subcommand, so they name the
  * site with `--site` or the project file, as `set` does.
  *
- * <b>A reply does not resolve unless asked.</b> A resolved thread stays on the version it was opened on, so
- * resolving right after the deploy that fixed it would take it off the live page before the person who
- * raised it has seen the answer.
+ * <b>A reply does not resolve unless asked.</b> The person who raised a thread is the one who can say the
+ * fix is right, so it is left open for them to check and resolve unless `--resolve` says otherwise.
  *
  * @param subcommand `reply`, `resolve`, `reopen`, or anything else for reading (then it is the site).
  * @param rest The positionals after the subcommand.
