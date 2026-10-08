@@ -1,6 +1,6 @@
 {
 	"name": "drop2run",
-	"version": "0.9.0",
+	"version": "0.8.0",
 	"description": "Publish a page, a folder of documents or a built site to Drop2Run from the command line.",
 	"license": "MIT",
 	"type": "module",
