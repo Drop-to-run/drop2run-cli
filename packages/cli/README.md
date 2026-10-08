@@ -29,6 +29,9 @@ drop2run pause [site]                        Take a site off the air, keeping it
 drop2run resume [site]                       Put a paused site back on the air
 drop2run rollback <deployId> [--site X]      Put an earlier version back live
 drop2run rm <site> --yes                     Delete a site and everything on it
+drop2run comments [site]                     Read the comments left on a site's pages
+drop2run comments reply <thread> <text>      Answer a thread as the owner [--resolve]
+drop2run comments resolve|reopen <thread>    Resolve a thread, or open it again
 drop2run token list                          List your access tokens
 drop2run whoami                              Check the token and whose it is
 drop2run where                               Show which token source is in use
@@ -36,6 +39,23 @@ drop2run --version                           Print the version
 ```
 
 `--json` on any command prints machine-readable output instead of text.
+
+## Comments
+
+On a plan that includes comments, people viewing a site can pin comments to its pages. `drop2run comments`
+reads them — each thread's id, page, the words it points at, and every comment — with `--status
+open|resolved|all` and `--path /page` to narrow it. The owner of the account can answer from here:
+
+```bash
+drop2run comments calm-cedar                                   # open threads
+drop2run deploy dist                                           # publish the fix first
+drop2run comments reply 01JTHREAD... "Fixed — please check" --site calm-cedar
+```
+
+The reply shows on the page, labelled as sent through the API, and the people in the thread are emailed.
+It leaves the thread open unless `--resolve` is given: a resolved thread stays on the version it was
+opened on, so resolving right after the deploy that fixed it takes it off the live page before its author
+has seen the answer. `comments resolve` and `comments reopen` change a thread's state on its own.
 
 ## Which site a command acts on
 

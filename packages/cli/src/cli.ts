@@ -1,6 +1,8 @@
 import type { NewSite } from "@drop2run/node";
 import {
 	type CommandResult,
+	type CommentOptions,
+	comments,
 	deployCommand,
 	folders,
 	info,
@@ -53,6 +55,9 @@ const HELP = `drop2run — publish a static site from the command line
   drop2run resume [site]                       Put a paused site back on the air
   drop2run rollback <deployId> [--site X]      Put an earlier version back live
   drop2run rm <site> --yes                     Delete a site and everything on it
+  drop2run comments [site]                     Read the comments left on a site's pages
+  drop2run comments reply <thread> <text>      Answer a thread as the owner [--resolve]
+  drop2run comments resolve|reopen <thread>    Resolve a thread, or open it again
   drop2run token list                          List your access tokens
   drop2run whoami                              Check the token and whose it is
   drop2run where                               Show which token source is in use
@@ -68,6 +73,16 @@ Flags
   --yes          Confirm a deletion, which cannot be undone
   --then X       What \`set expires\` does when the date arrives: pause
                  (the default, keeps the files) or delete (needs --yes)
+  --status X     Which comment threads: open (the default), resolved or all
+  --path X       Only the comments on one page, such as /pricing
+  --resolve      Resolve the thread with the reply (\`comments reply\` only)
+
+Comments
+  \`comments reply\`, \`resolve\` and \`reopen\` act on --site, else the site in
+  drop2run.json, and only the account's owner can use them. Deploy the fix
+  before replying that it is fixed. A reply leaves the thread open unless
+  --resolve is given: a resolved thread stays on the version it was opened
+  on, so it would vanish from the live page before its author saw the answer.
 
 Settings
   set name <text>               What the dashboard calls the site; put a
@@ -129,7 +144,7 @@ function flagValue(args: readonly string[], flag: string): string | undefined {
  * Kept as one list because the parser has two questions about a flag — what its value is, and whether
  * the next word belongs to it — and answering them from two lists is how they disagree.
  */
-const VALUE_FLAGS = ["--site", "--subdomain", "--folder", "--then"];
+const VALUE_FLAGS = ["--site", "--subdomain", "--folder", "--then", "--status", "--path"];
 
 /**
  * Pulls out the positional arguments, leaving flags and the values that belong to them behind.
@@ -311,6 +326,11 @@ export async function run(commandLine: readonly string[]): Promise<CommandResult
 		argv.includes("--yes"),
 		{ subdomain, folder },
 		then,
+		{
+			status: flagValue(argv, "--status"),
+			path: flagValue(argv, "--path"),
+			resolve: argv.includes("--resolve"),
+		},
 	);
 
 	return json ? { ...result, text: JSON.stringify(result.json, null, 2) } : result;
@@ -329,6 +349,7 @@ export async function run(commandLine: readonly string[]): Promise<CommandResult
  * @param confirmed Whether `--yes` was given, which is the only confirmation a deletion gets.
  * @param newSite Values of `--subdomain` and `--folder`, already checked against the command and `--site`.
  * @param then Value of `--then`, which only `set expires` reads.
+ * @param commentOptions `--status`, `--path` and `--resolve`, which only `comments` reads.
  * @returns The command's result.
  */
 async function dispatch(
@@ -340,6 +361,7 @@ async function dispatch(
 	confirmed: boolean,
 	newSite: NewSite = {},
 	then: string | undefined = undefined,
+	commentOptions: CommentOptions = {},
 ): Promise<CommandResult> {
 	switch (command) {
 		case "login": {
@@ -393,6 +415,8 @@ async function dispatch(
 			return await rollback(rest[0], site);
 		case "rm":
 			return await remove(rest[0] ?? site, confirmed);
+		case "comments":
+			return await comments(rest[0], rest.slice(1), site, commentOptions);
 		case "token":
 		case "tokens":
 			// One subcommand, and an unknown one is refused rather than treated as `list`: `token revoke`

@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import {
 	accessOf,
+	type CommentThread,
 	type Credentials,
 	clearToken,
 	clientName,
@@ -14,6 +15,7 @@ import {
 	exchange,
 	findSite,
 	getSite,
+	listComments,
 	listen,
 	listFolders,
 	listSites,
@@ -30,6 +32,7 @@ import {
 	promoteDeploy,
 	publishDirectory,
 	readProject,
+	replyToComment,
 	resolveApiBaseUrl,
 	resolveFolder,
 	resolveFolderTarget,
@@ -37,6 +40,7 @@ import {
 	type SiteSettingsChange,
 	saveToken,
 	servingModeOf,
+	setCommentResolved,
 	setSitePaused,
 	startDevice,
 	TOKEN_VARIABLE,
@@ -1084,6 +1088,171 @@ export async function tokens(): Promise<CommandResult> {
 	} catch (error) {
 		return failure(error instanceof Error ? error.message : String(error));
 	}
+}
+
+/** What `comments` takes besides its subcommand and positionals. */
+export interface CommentOptions {
+	/** Value of `--status`: `open`, `resolved` or `all`. */
+	readonly status?: string | undefined;
+	/** Value of `--path`: one page of the site. */
+	readonly path?: string | undefined;
+	/** Whether `--resolve` was given, to resolve a thread with the reply. */
+	readonly resolve?: boolean | undefined;
+}
+
+/** How `comments` is used, for its refusals. */
+const COMMENTS_USAGE = [
+	"  drop2run comments [site] [--status open|resolved|all] [--path /page]",
+	"  drop2run comments reply <thread> <text> [--resolve] [--site X]",
+	"  drop2run comments resolve|reopen <thread> [--site X]",
+].join("\n");
+
+/**
+ * Reads a site's comments, or answers, resolves or reopens a thread as its owner
+ * (docs/briefs/FEEDBACK-MCP-BRIEF.md §4.6).
+ *
+ * <b>Reading names the site in the same place every other read does</b> — `comments calm-cedar`, like
+ * `info calm-cedar` — while the three that act on a thread take it after the subcommand, so they name the
+ * site with `--site` or the project file, as `set` does.
+ *
+ * <b>A reply does not resolve unless asked.</b> A resolved thread stays on the version it was opened on, so
+ * resolving right after the deploy that fixed it would take it off the live page before the person who
+ * raised it has seen the answer.
+ *
+ * @param subcommand `reply`, `resolve`, `reopen`, or anything else for reading (then it is the site).
+ * @param rest The positionals after the subcommand.
+ * @param site Value of `--site`, if given.
+ * @param options `--status`, `--path` and `--resolve`.
+ * @returns The result.
+ */
+export async function comments(
+	subcommand: string | undefined,
+	rest: readonly string[],
+	site: string | undefined,
+	options: CommentOptions,
+): Promise<CommandResult> {
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	const acting = subcommand === "reply" || subcommand === "resolve" || subcommand === "reopen";
+
+	if (!acting) {
+		const status = options.status ?? "open";
+		if (status !== "open" && status !== "resolved" && status !== "all") {
+			return failure(
+				`\`--status\` is open, resolved or all, not "${status}".\n\n${COMMENTS_USAGE}`,
+			);
+		}
+
+		const target = siteOr(subcommand ?? site, "drop2run comments <subdomain>");
+		if ("result" in target) return target.result;
+
+		try {
+			const summary = await findSite(found.credentials, target.named);
+			const read = await listComments(found.credentials, summary.siteId, {
+				status,
+				path: options.path,
+			});
+
+			return {
+				text: describeComments(read.threads, status, summary.subdomain, read.more),
+				json: read,
+				code: 0,
+			};
+		} catch (error) {
+			return failure(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	const [thread, ...words] = rest;
+	if (thread === undefined)
+		return failure(`Name the thread, from \`drop2run comments\`.\n\n${COMMENTS_USAGE}`);
+
+	const body = words.join(" ").trim();
+	if (subcommand === "reply" && body === "") {
+		return failure(`Write the reply after the thread id.\n\n${COMMENTS_USAGE}`);
+	}
+
+	const target = siteOr(site, `drop2run comments ${subcommand} <thread> --site <subdomain>`);
+	if ("result" in target) return target.result;
+
+	try {
+		const summary = await findSite(found.credentials, target.named);
+		const answered =
+			subcommand === "reply"
+				? await replyToComment(
+						found.credentials,
+						summary.siteId,
+						thread,
+						body,
+						options.resolve === true,
+					)
+				: await setCommentResolved(
+						found.credentials,
+						summary.siteId,
+						thread,
+						subcommand === "resolve",
+					);
+
+		const done =
+			subcommand === "reply"
+				? `Replied on ${answered.path}${answered.resolvedAt === null ? "" : " and resolved the thread"}.`
+				: `${subcommand === "resolve" ? "Resolved" : "Reopened"} the thread on ${answered.path}.`;
+
+		return { text: `${done}\n${answered.url}`, json: answered, code: 0 };
+	} catch (error) {
+		return failure(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/**
+ * A page of threads as a terminal shows it: each thread's id, page and the words it points at, then its
+ * comments one to a line.
+ *
+ * @param threads The threads.
+ * @param status Which threads were asked for, for the heading.
+ * @param subdomain The site.
+ * @param more Whether another page follows.
+ * @returns The text.
+ */
+function describeComments(
+	threads: readonly CommentThread[],
+	status: string,
+	subdomain: string,
+	more: boolean,
+): string {
+	const which = status === "all" ? "" : `${status} `;
+	if (threads.length === 0) return `No ${which}comment threads on ${subdomain}.`;
+
+	const heading =
+		`${threads.length} ${which}comment ${threads.length === 1 ? "thread" : "threads"} on ${subdomain}` +
+		(more ? " (more follow; `--json` shows the cursor)." : ".");
+
+	const blocks = threads.map((thread) => {
+		const where = thread.place.quote ?? (thread.place.snippet || null);
+		const flags = [
+			...(thread.resolvedAt === null ? [] : ["resolved"]),
+			...(thread.outdated ? ["earlier version"] : []),
+		];
+
+		return [
+			`${thread.id}  ${thread.path}${where === null ? "" : `  "${where}"`}` +
+				(flags.length === 0 ? "" : `  (${flags.join(", ")})`),
+			...thread.comments.map((comment) => {
+				const tags = [
+					...(comment.author.owner ? ["owner"] : []),
+					...(comment.source === "Api" ? ["via API"] : []),
+				];
+				const who =
+					tags.length === 0 ? comment.author.name : `${comment.author.name} (${tags.join(", ")})`;
+
+				return `  ${who}: ${comment.body.replace(/\s*\n\s*/g, " ")}`;
+			}),
+			`  ${thread.url}`,
+		].join("\n");
+	});
+
+	return [heading, ...blocks].join("\n\n");
 }
 
 /**

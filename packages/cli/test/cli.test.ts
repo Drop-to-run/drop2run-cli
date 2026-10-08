@@ -1199,3 +1199,141 @@ describe("pause on a site Drop2Run suspended", () => {
 		expect(result.text).toContain("cannot bring it back");
 	});
 });
+
+describe("comments", () => {
+	/** A thread as the API returns it. */
+	const THREAD = {
+		id: "01JTHREAD",
+		path: "/pricing",
+		url: "https://calm-cedar.dropto.live/pricing?d2r_comment=01JTHREAD",
+		place: {
+			kind: "text",
+			quote: "free tier",
+			prefix: null,
+			suffix: null,
+			snippet: null,
+			selector: "p",
+		},
+		outdated: true,
+		createdAt: "2026-10-08T00:00:00Z",
+		resolvedAt: null,
+		resolvedBy: null,
+		comments: [
+			{
+				id: "01JC1",
+				author: { name: "Cam", owner: false, removed: false },
+				body: "The price\nis wrong",
+				createdAt: "2026-10-08T00:00:00Z",
+				editedAt: null,
+				source: "Page",
+			},
+			{
+				id: "01JC2",
+				author: { name: "Olivia", owner: true, removed: false },
+				body: "Fixed",
+				createdAt: "2026-10-08T00:01:00Z",
+				editedAt: null,
+				source: "Api",
+			},
+		],
+	};
+
+	/**
+	 * Answers the calls `comments` makes, recording each one.
+	 *
+	 * @param seen Collects `METHOD path?query body` per request.
+	 */
+	function stubApi(seen: string[]): void {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL, init?: RequestInit) => {
+				const url = new URL(String(input));
+				seen.push(
+					`${init?.method ?? "GET"} ${url.pathname}${url.search} ${init?.body ?? ""}`.trim(),
+				);
+
+				if (url.pathname === "/api/sites") {
+					return Response.json({
+						sites: [
+							{
+								siteId: "01J",
+								subdomain: "calm-cedar",
+								url: "https://calm-cedar.dropto.live",
+								name: null,
+							},
+						],
+					});
+				}
+
+				return url.pathname.endsWith("/feedback/threads")
+					? Response.json({ cursor: 9, threads: [THREAD], page: 0, more: false })
+					: Response.json(THREAD);
+			}),
+		);
+	}
+
+	it("lists a site's threads with where each sits and who said what", async () => {
+		const seen: string[] = [];
+		stubApi(seen);
+
+		const result = await run(["comments", "calm-cedar", "--status", "all", "--path", "/pricing"]);
+
+		expect(result.code).toBe(0);
+		expect(seen).toContain("GET /api/sites/01J/feedback/threads?status=all&path=%2Fpricing");
+		expect(result.text).toContain('01JTHREAD  /pricing  "free tier"  (earlier version)');
+		// One line per comment, whatever line breaks the commenter typed.
+		expect(result.text).toContain("  Cam: The price is wrong");
+		expect(result.text).toContain("  Olivia (owner, via API): Fixed");
+	});
+
+	it("refuses a status it does not know before calling anything", async () => {
+		const seen: string[] = [];
+		stubApi(seen);
+
+		const result = await run(["comments", "calm-cedar", "--status", "closed"]);
+
+		expect(result.code).toBe(1);
+		expect(seen).toEqual([]);
+	});
+
+	it("replies without resolving unless --resolve is given, on the site --site names", async () => {
+		const seen: string[] = [];
+		stubApi(seen);
+
+		const plain = await run([
+			"comments",
+			"reply",
+			"01JTHREAD",
+			"Fixed",
+			"in",
+			"v12",
+			"--site",
+			"calm-cedar",
+		]);
+		await run(["comments", "reply", "01JTHREAD", "Done", "--resolve", "--site", "calm-cedar"]);
+
+		expect(plain.code).toBe(0);
+		expect(plain.text).toContain("Replied on /pricing.");
+		expect(seen).toContain(
+			'POST /api/sites/01J/feedback/threads/01JTHREAD/comments {"body":"Fixed in v12","resolve":false}',
+		);
+		expect(seen).toContain(
+			'POST /api/sites/01J/feedback/threads/01JTHREAD/comments {"body":"Done","resolve":true}',
+		);
+	});
+
+	it("resolves and reopens by their own routes, and asks for a reply's text", async () => {
+		const seen: string[] = [];
+		stubApi(seen);
+
+		await run(["comments", "resolve", "01JTHREAD", "--site", "calm-cedar"]);
+		await run(["comments", "reopen", "01JTHREAD", "--site", "calm-cedar"]);
+		const empty = await run(["comments", "reply", "01JTHREAD", "--site", "calm-cedar"]);
+
+		expect(seen).toContain("POST /api/sites/01J/feedback/threads/01JTHREAD/resolve");
+		expect(seen).toContain("POST /api/sites/01J/feedback/threads/01JTHREAD/reopen");
+		expect(empty.code).toBe(1);
+		expect(seen.filter((call) => call.includes("/comments"))).toEqual([]);
+	});
+});
