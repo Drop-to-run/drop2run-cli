@@ -8,7 +8,9 @@
  * refuses is the one everybody tested with.
  *
  * Filtered by the caller, before the manifest exists. The server does not know these are junk, so this
- * is the only thing keeping them out.
+ * is the only thing keeping them out — with one exception: environment files ({@link isEnvironmentFile})
+ * are also refused by `PrepareDeploy`, because they are not junk but secrets, and a client that predates
+ * this rule must not be able to publish one.
  */
 
 /** File names dropped wherever they appear. */
@@ -42,6 +44,22 @@ const IGNORED_DIRECTORIES = [
 ];
 
 /**
+ * Whether a file name is a dotenv or direnv file: `.env`, `.env.<anything>`, or `.envrc`.
+ *
+ * These hold API keys and database passwords, and they sit in exactly the project root people drag in.
+ * Unlike the rest of this list they are dropped for what they contain rather than for being noise, which
+ * is why the server checks the same names — mirrored in `PrepareDeploy.IsEnvironmentFile`; change one,
+ * change the other. `.env.example` goes too: it is meant to be harmless, but telling the two apart means
+ * trusting that nobody pasted a real key into the template.
+ *
+ * @param name A single path segment.
+ * @returns True when the name is an environment file.
+ */
+export function isEnvironmentFile(name: string): boolean {
+	return name === ".env" || name === ".envrc" || name.startsWith(".env.");
+}
+
+/**
  * Whether a collected path should be dropped before it reaches the manifest.
  *
  * @param path Path relative to the publish root, `/`-separated.
@@ -51,7 +69,7 @@ export function shouldIgnore(path: string): boolean {
 	const segments = path.split("/");
 	const name = segments.at(-1) ?? "";
 
-	if (name === "" || IGNORED_EXACT.has(name)) return true;
+	if (name === "" || IGNORED_EXACT.has(name) || isEnvironmentFile(name)) return true;
 
 	// AppleDouble sidecars, which macOS writes into zips next to the real file.
 	if (name.startsWith("._")) return true;
