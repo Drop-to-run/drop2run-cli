@@ -1,10 +1,5 @@
-import {
-	ClientErrorCode,
-	DeployError,
-	describeError,
-	type ManifestFile,
-	sizeOf,
-} from "./types.js";
+import type { UploadBatch } from "./batch.js";
+import { ClientErrorCode, DeployError, describeError, type ManifestFile, sizeOf } from "./types.js";
 import type { UploadTarget } from "./upload.js";
 
 /**
@@ -57,6 +52,15 @@ export interface PrepareResponse {
 	readonly unchanged?: boolean;
 	/** Public URL of the site. Sent only alongside `unchanged`, which ends the deploy there. */
 	readonly url?: string;
+	/**
+	 * Batch permits, each covering several small files sent as one body (docs/briefs/UPLOAD-BATCH-BRIEF.md).
+	 *
+	 * Optional because an API released before batches never sends it — and an API that does sends an
+	 * empty list unless batches were asked for and are switched on. A file is in `upload` or here, never
+	 * both. Send `upload` first and these after, each in order: every permit's lifetime is sized for the
+	 * queue ahead of it in exactly that order.
+	 */
+	readonly batches?: readonly UploadBatch[];
 }
 
 /** Response of `POST /sites/{siteId}/deploys/{deployId}/complete`. */
@@ -182,7 +186,9 @@ export async function prepareDeploy(
 
 	const prepared = await request<PrepareResponse>(
 		`sites/${encodeURIComponent(siteId)}/deploys/prepare`,
-		{ files: manifest },
+		// `batches` asks for batch permits; an API that predates them ignores the field, and one that
+		// knows them answers with single permits until they are switched on.
+		{ files: manifest, batches: true },
 		options,
 		signal,
 	);

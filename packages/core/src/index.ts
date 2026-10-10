@@ -15,6 +15,15 @@ export {
 	prepareDeploy,
 } from "./api.js";
 export {
+	type BatchFileRef,
+	type BatchResult,
+	batchLayout,
+	isBatch,
+	parseBatchResult,
+	type UploadBatch,
+} from "./batch.js";
+export { mapInOrder } from "./concurrency.js";
+export {
 	DOCUMENT_EXTENSIONS,
 	EDITABLE_EXTENSIONS,
 	extensionOf,
@@ -27,7 +36,6 @@ export {
 	VIEWABLE_EXTENSIONS,
 	WEB_ASSET_EXTENSIONS,
 } from "./fileTypes.js";
-export { mapInOrder } from "./concurrency.js";
 export { hashAll, sha256Hex } from "./hash.js";
 export { shouldIgnore } from "./ignore.js";
 export {
@@ -70,9 +78,9 @@ export {
 	describeError,
 	type FileContent,
 	type ManifestFile,
-	sizeOf,
 	type ProgressEvent,
 	type ProgressListener,
+	sizeOf,
 } from "./types.js";
 export {
 	asDeployError,
@@ -80,6 +88,7 @@ export {
 	isAbort,
 	outOfMemory,
 	type PutRequest,
+	type PutResponse,
 	type PutTransport,
 	type RetryListener,
 	StalledError,

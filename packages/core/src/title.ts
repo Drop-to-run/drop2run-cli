@@ -52,9 +52,7 @@ const TITLE_SEPARATORS = ["|", "·", "—", "–", " - "];
  * @param files The collected files, as they are about to be hashed.
  * @returns The suggested name, or null when the drop offers none.
  */
-export function suggestSiteName(
-	files: readonly CollectedFile[],
-): string | null {
+export function suggestSiteName(files: readonly CollectedFile[]): string | null {
 	const index = files.find((file) => file.path === "index.html");
 	// A page still on disk cannot be read synchronously; {@link readSiteName} reads it first.
 	if (index === undefined || !ArrayBuffer.isView(index.bytes)) return null;
@@ -101,9 +99,7 @@ export async function readSiteName(files: readonly CollectedFile[]): Promise<str
  * @returns The decoded head of the document.
  */
 function decodeHead(bytes: Uint8Array): string {
-	return new TextDecoder("utf-8", { fatal: false }).decode(
-		bytes.subarray(0, HEAD_BYTES),
-	);
+	return new TextDecoder("utf-8", { fatal: false }).decode(bytes.subarray(0, HEAD_BYTES));
 }
 
 /**
@@ -121,9 +117,7 @@ function nameFromHtml(html: string): string | null {
 
 	const candidates = document
 		? [
-				document
-					.querySelector('meta[property="og:site_name"]')
-					?.getAttribute("content"),
+				document.querySelector('meta[property="og:site_name"]')?.getAttribute("content"),
 				document.querySelector("title")?.textContent,
 				document.querySelector("h1")?.textContent,
 			]
@@ -217,9 +211,7 @@ interface DomParserLike {
  * @returns The tag's contents, or null.
  */
 function matchTag(html: string, tag: string): string | null {
-	const match = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}\\s*>`, "i").exec(
-		html,
-	);
+	const match = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}\\s*>`, "i").exec(html);
 
 	return match?.[1] === undefined ? null : decodeEntities(match[1]);
 }
@@ -379,9 +371,7 @@ function clean(raw: string | null | undefined): string | null {
 	if (name.length === 0) return null;
 	if (PLACEHOLDERS.has(name.toLowerCase())) return null;
 
-	return name.length > MAX_NAME_LENGTH
-		? name.slice(0, MAX_NAME_LENGTH).trimEnd()
-		: name;
+	return name.length > MAX_NAME_LENGTH ? name.slice(0, MAX_NAME_LENGTH).trimEnd() : name;
 }
 
 /**

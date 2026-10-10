@@ -1,4 +1,5 @@
 import { type ApiOptions, completeDeploy, prepareDeploy } from "./api.js";
+import { batchLayout } from "./batch.js";
 import { hashAll } from "./hash.js";
 import { checkLimits, type PlanLimits, renameOfLoneHtmlPage, servingModeOf } from "./limits.js";
 import { readSiteName } from "./title.js";
@@ -124,16 +125,29 @@ export async function deploy(
 		// the other 497 had been lost — so the files the server is reusing are counted as already done.
 		// Bytes are the other way round: only what is actually sent, because that is what takes the time.
 		const sizes = new Map(hashed.map((file) => [file.path, sizeOf(file.bytes)]));
-		const totalBytes = prepared.upload.reduce(
-			(sum, target) => sum + (sizes.get(target.path) ?? 0),
-			0,
-		);
+		const batches = prepared.batches ?? [];
+		// Single permits first, then batches, each in the order given: the order every permit's lifetime
+		// was sized for.
+		const targets = [...prepared.upload, ...batches];
+		const totalBytes =
+			prepared.upload.reduce((sum, target) => sum + (sizes.get(target.path) ?? 0), 0) +
+			batches.reduce((sum, batch) => {
+				const members = batch.files.map((ref) => ({
+					sha256: ref.sha256,
+					size: sizes.get(ref.path) ?? 0,
+				}));
+
+				// The layout travels in the body too, and for many small files it is a real share of it.
+				return (
+					sum + batchLayout(members).length + members.reduce((n, member) => n + member.size, 0)
+				);
+			}, 0);
 
 		// Said before the first byte rather than when the first file lands. An upload whose first
 		// attempts all fail never lands a file, and the screen went on reading "Getting ready" under a
 		// line about retrying an upload — the stage named a step that had already finished. Only when
 		// there is something to send: a redeploy that reuses every file goes straight to completing.
-		if (prepared.upload.length > 0) {
+		if (targets.length > 0) {
 			onProgress({
 				type: "uploading",
 				done: prepared.reused,
@@ -145,7 +159,7 @@ export async function deploy(
 		}
 
 		await uploadAll(
-			prepared.upload,
+			targets,
 			prepared.uploadUrl,
 			hashed,
 			(done, _total, bytes, path) =>

@@ -1,3 +1,4 @@
+import { batchLayout, isBatch, parseBatchResult, type UploadBatch } from "./batch.js";
 import {
 	ClientErrorCode,
 	DeployError,
@@ -66,7 +67,19 @@ const PROGRESS_INTERVAL_MS = 200;
  * Separate from {@link UploadDeps.fetch} because `fetch` cannot report upload progress: its body is
  * opaque until the response arrives, so a 50 MB file is invisible for as long as it takes to send.
  */
-export type PutTransport = (request: PutRequest) => Promise<number>;
+export type PutTransport = (request: PutRequest) => Promise<number | PutResponse>;
+
+/**
+ * A transport's answer when the caller asked for the body ({@link PutRequest.wantsBody}).
+ *
+ * A single upload only needs the status. A batch answers with what it stored, and that is in the body.
+ */
+export interface PutResponse {
+	/** HTTP status. */
+	readonly status: number;
+	/** The response body as text. */
+	readonly body: string;
+}
 
 /** What a {@link PutTransport} is asked to send. */
 export interface PutRequest {
@@ -82,6 +95,8 @@ export interface PutRequest {
 	readonly onSent: (bytes: number) => void;
 	/** Idle time after which the transport gives up with a {@link StalledError}. */
 	readonly stallMs: number;
+	/** Whether the response body is needed, as it is for a batch. */
+	readonly wantsBody?: boolean;
 }
 
 /** Raised by a transport whose request stopped moving for longer than the stall limit. */
@@ -170,7 +185,7 @@ export type RetryListener = (
  * @throws DeployError When a file still fails after every retry, or when cancelled.
  */
 export async function uploadAll(
-	targets: readonly UploadTarget[],
+	targets: readonly (UploadTarget | UploadBatch)[],
 	uploadUrl: string,
 	files: readonly ManifestFile[],
 	onProgress?: (done: number, total: number, bytes: number, path?: string) => void,
@@ -187,6 +202,11 @@ export async function uploadAll(
 	const maxBytesInFlight = deps.maxBytesInFlight ?? DEFAULT_BYTES_IN_FLIGHT;
 
 	const byPath = new Map(files.map((file) => [file.path, file]));
+	// Files, not targets: a batch is one target and many files, and progress is counted in files.
+	const fileCount = targets.reduce(
+		(sum, target) => sum + (isBatch(target) ? target.files.length : 1),
+		0,
+	);
 
 	let nextIndex = 0;
 	let done = 0;
@@ -272,7 +292,7 @@ export async function uploadAll(
 		let bytes = landedBytes;
 		for (const sent of inFlight.values()) bytes += sent;
 
-		onProgress(done, targets.length, bytes, path);
+		onProgress(done, fileCount, bytes, path);
 	};
 
 	/** Takes targets off the shared queue until it is empty. */
@@ -288,18 +308,37 @@ export async function uploadAll(
 
 			inner.throwIfAborted();
 
-			const file = byPath.get(target.path);
-			if (file === undefined) {
-				const missing = new DeployError(
-					ClientErrorCode.UploadFailed,
-					`The server asked for ${target.path}, which is not in the manifest.`,
-					{ path: target.path },
-				);
-				fail(missing);
-				throw missing;
+			// A batch is several files and a single target is one; past this point both are a list of the
+			// files to send, so counting, the byte budget and reporting are the same code for either.
+			const refs = isBatch(target) ? target.files : [target];
+			const members: ManifestFile[] = [];
+
+			for (const ref of refs) {
+				const file = byPath.get(ref.path);
+				if (file === undefined) {
+					const missing = new DeployError(
+						ClientErrorCode.UploadFailed,
+						`The server asked for ${ref.path}, which is not in the manifest.`,
+						{ path: ref.path },
+					);
+					fail(missing);
+					throw missing;
+				}
+				members.push(file);
 			}
 
-			const size = sizeOf(file.bytes);
+			const layout = isBatch(target)
+				? new TextEncoder().encode(
+						batchLayout(
+							target.files.map((ref, i) => ({
+								sha256: ref.sha256,
+								size: sizeOf((members[i] as ManifestFile).bytes),
+							})),
+						),
+					)
+				: null;
+			const size = members.reduce((sum, file) => sum + sizeOf(file.bytes), layout?.length ?? 0);
+			const label = (members[0] as ManifestFile).path;
 			await acquire(size);
 
 			try {
@@ -307,23 +346,27 @@ export async function uploadAll(
 				if (failed) return;
 				inner.throwIfAborted();
 
-				await uploadOne(target, file, {
+				const context = {
 					put,
 					delay,
 					retries,
 					signal: inner,
 					uploadUrl,
 					stallMs,
-					onSent: (sent) => {
+					onSent: (sent: number) => {
 						inFlight.set(index, sent);
 						report();
 					},
-					onRetry: (attempt, stalled) => {
+					onRetry: (attempt: number, stalled: boolean) => {
 						// The abandoned attempt's bytes are not on the server, so they stop counting.
 						inFlight.set(index, 0);
-						onRetry?.(target.path, attempt, retries + 1, stalled);
+						onRetry?.(label, attempt, retries + 1, stalled);
 					},
-				});
+				};
+
+				if (isBatch(target) && layout !== null)
+					await uploadBatchOne(target, members, layout, context);
+				else await uploadOne(target as UploadTarget, members[0] as ManifestFile, context);
 			} catch (error) {
 				fail(error);
 				throw error;
@@ -332,9 +375,9 @@ export async function uploadAll(
 			}
 
 			inFlight.delete(index);
-			done += 1;
+			done += members.length;
 			landedBytes += size;
-			report(file.path);
+			report((members.at(-1) as ManifestFile).path);
 		}
 	};
 
@@ -388,7 +431,7 @@ async function uploadOne(
 		}
 
 		try {
-			const status = await context.put({
+			const answer = await context.put({
 				url: context.uploadUrl,
 				token: target.token,
 				body: untyped(file.bytes),
@@ -396,6 +439,7 @@ async function uploadOne(
 				onSent: context.onSent,
 				stallMs: context.stallMs,
 			});
+			const status = typeof answer === "number" ? answer : answer.status;
 
 			if (status >= 200 && status < 300) return;
 
@@ -440,6 +484,122 @@ async function uploadOne(
 
 	throw new DeployError(ClientErrorCode.UploadFailed, message, {
 		path: target.path,
+		cause: describeError(lastError),
+	});
+}
+
+/**
+ * Sends one batch — several files in one request — retrying the whole batch with backoff.
+ *
+ * The body is the layout, then each file's bytes in layout order, as one `Blob` built with no type: a
+ * `Blob` assembled from `File`s keeps references to them, so the browser streams them from disk and
+ * copies nothing, and an empty type means no `Content-Type` header, which the Worker's CORS policy would
+ * refuse (see {@link untyped}).
+ *
+ * The Worker answers 200 with what it stored. Files already written are cheap to send again — the
+ * ledger answers "already" and nothing is written — so a partial failure is retried as the whole batch
+ * rather than tracked file by file. A file whose bytes no longer match its digest changed on disk after
+ * it was hashed; no retry fixes that, so it stops the deploy at once.
+ *
+ * @param batch The batch permit.
+ * @param members The batch's files, in layout order.
+ * @param layout The layout bytes the permit signed.
+ * @param context Same dependencies as {@link uploadOne}.
+ * @throws DeployError When a file changed, the batch was refused, or every attempt failed.
+ */
+async function uploadBatchOne(
+	batch: UploadBatch,
+	members: readonly ManifestFile[],
+	layout: Uint8Array,
+	context: Parameters<typeof uploadOne>[2],
+): Promise<void> {
+	const first = (members[0] as ManifestFile).path;
+	const label = members.length === 1 ? first : `${first} and ${members.length - 1} more`;
+	let lastError: unknown;
+
+	for (let attempt = 0; attempt <= context.retries; attempt++) {
+		context.signal?.throwIfAborted();
+
+		if (attempt > 0) {
+			context.onRetry(attempt + 1, lastError instanceof StalledError);
+			await context.delay(BACKOFF_MS[attempt - 1] ?? BACKOFF_MS.at(-1) ?? 1000);
+			context.signal?.throwIfAborted();
+		}
+
+		try {
+			// Rebuilt per attempt: a Blob is a description of its parts, not a copy of them, so this costs
+			// nothing and leaves no consumed stream behind.
+			// The parts type is spelled through the constructor because the CLI builds without DOM types,
+			// where `BlobPart` does not exist; the cast is the SharedArrayBuffer distinction `sha256Hex`
+			// explains, nothing more.
+			const body = new Blob([layout, ...members.map((file) => file.bytes)] as NonNullable<
+				ConstructorParameters<typeof Blob>[0]
+			>);
+			const answer = await context.put({
+				url: context.uploadUrl,
+				token: batch.token,
+				body,
+				signal: context.signal,
+				onSent: context.onSent,
+				stallMs: context.stallMs,
+				wantsBody: true,
+			});
+			const status = typeof answer === "number" ? answer : answer.status;
+
+			if (status >= 200 && status < 300) {
+				const result = typeof answer === "number" ? null : parseBatchResult(answer.body);
+				if (result === null) {
+					lastError = new Error(
+						"The upload service answered with something that is not a batch result.",
+					);
+					continue;
+				}
+				if (result.failed.length === 0) return;
+
+				const changed = result.failed.find((failure) => failure.reason === "hash_mismatch");
+				if (changed !== undefined) {
+					const path = (members[changed.i] as ManifestFile | undefined)?.path ?? first;
+
+					throw new DeployError(
+						ClientErrorCode.ReadFailed,
+						`${path} changed after it was read, so it no longer matches what was checked. Drop the folder again.`,
+						{ path },
+					);
+				}
+
+				lastError = new Error(
+					`${result.failed.length} of ${members.length} files were not stored.`,
+				);
+				continue;
+			}
+
+			// As for one file: a refused, expired or malformed permit, or one over its deploy's allowance,
+			// will not start working on a retry. 400 and 411 here mean the batch itself was not what its
+			// permit described, which is a bug on one side and equally final.
+			if ([400, 401, 403, 411, 413, 429].includes(status)) {
+				throw new DeployError(
+					ClientErrorCode.UploadFailed,
+					`Upload of ${label} was refused. The upload window may have expired — try deploying again.`,
+					{ path: first, status },
+				);
+			}
+
+			lastError = new Error(`HTTP ${status}`);
+		} catch (error) {
+			if (error instanceof DeployError) throw error;
+			if (isAbort(error)) throw cancelled();
+
+			lastError = error;
+		}
+	}
+
+	const message =
+		lastError instanceof StalledError
+			? `Upload of ${label} stopped moving and did not recover after ${context.retries + 1} attempts. Check your connection and try again.`
+			: `Could not upload ${label} after ${context.retries + 1} attempts.`;
+
+	throw new DeployError(ClientErrorCode.UploadFailed, message, {
+		path: first,
 		cause: describeError(lastError),
 	});
 }
@@ -490,7 +650,8 @@ function defaultTransport(doFetch: typeof fetch | undefined): PutTransport {
  * @returns The transport.
  */
 function fetchTransport(doFetch: typeof fetch): PutTransport {
-	return async ({ url, token, body, signal }) => {
+	return async (request) => {
+		const { url, token, body, signal } = request;
 		const response = await doFetch(url, {
 			method: "PUT",
 			// The view, not a copy. Wrapping it in `new Blob([body.slice().buffer])` made two extra
@@ -506,7 +667,9 @@ function fetchTransport(doFetch: typeof fetch): PutTransport {
 			...(signal ? { signal } : {}),
 		});
 
-		return response.status;
+		return request.wantsBody === true
+			? { status: response.status, body: await response.text() }
+			: response.status;
 	};
 }
 
@@ -514,6 +677,8 @@ function fetchTransport(doFetch: typeof fetch): PutTransport {
 interface XhrLike {
 	/** HTTP status once loaded. */
 	readonly status: number;
+	/** The response body as text once loaded; optional so a stand-in that never answers a batch can omit it. */
+	readonly responseText?: string;
 	/** Progress of the request body. */
 	readonly upload: { onprogress: ((event: { loaded: number }) => void) | null };
 	/** Fires as the response arrives. */
@@ -545,8 +710,8 @@ type XhrConstructor = new () => XhrLike;
  * @returns The transport.
  */
 export function xhrTransport(Xhr: XhrConstructor): PutTransport {
-	return ({ url, token, body, signal, onSent, stallMs }) =>
-		new Promise<number>((resolve, reject) => {
+	return ({ url, token, body, signal, onSent, stallMs, wantsBody }) =>
+		new Promise<number | PutResponse>((resolve, reject) => {
 			const xhr = new Xhr();
 			let settled = false;
 			let timer: ReturnType<typeof setTimeout> | undefined;
@@ -590,7 +755,12 @@ export function xhrTransport(Xhr: XhrConstructor): PutTransport {
 				onSent(event.loaded);
 			};
 			xhr.onprogress = arm;
-			xhr.onload = () => settle(() => resolve(xhr.status));
+			xhr.onload = () =>
+				settle(() =>
+					resolve(
+						wantsBody === true ? { status: xhr.status, body: xhr.responseText ?? "" } : xhr.status,
+					),
+				);
 			xhr.onerror = () => settle(() => reject(new TypeError("Network error during upload.")));
 
 			arm();
