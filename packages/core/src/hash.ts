@@ -1,3 +1,4 @@
+import { mapInOrder } from "./concurrency.js";
 import {
 	bytesOf,
 	ClientErrorCode,
@@ -5,6 +6,7 @@ import {
 	DeployError,
 	describeError,
 	type ManifestFile,
+	sizeOf,
 } from "./types.js";
 
 /**
@@ -26,22 +28,40 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
 	// nothing here produces.
 	const digest = await crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>);
 
-	return [...new Uint8Array(digest)]
-		.map((byte) => byte.toString(16).padStart(2, "0"))
-		.join("");
+	return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
+
+/** Most files hashed at once. */
+const HASH_CONCURRENCY = 4;
+
+/**
+ * Most bytes held for hashing at once.
+ *
+ * A file still on disk is read whole, hashed and let go, so what is in flight is what is in memory.
+ * Sixteen MiB lets four small files overlap their reads while a large one still runs alone — the same
+ * shape as the upload's byte budget, for the same reason: the browser that runs out of memory here
+ * reports nothing, and the page then blames the drop.
+ */
+const HASH_BYTES_IN_FLIGHT = 16 * 1024 * 1024;
 
 /**
  * Hashes every collected file, reporting progress as it goes.
  *
- * Sequential on purpose: `crypto.subtle` is already native, and hashing in parallel on one thread only
- * adds scheduling overhead while making progress reporting jump around. It also bounds memory: a file
- * still on disk is read here, hashed and let go, so only one is ever held — and the manifest keeps the
- * on-disk handle, not the bytes, so the upload reads it again from disk.
+ * <b>Several at once, bounded by bytes.</b> This was sequential, on the reasoning that `crypto.subtle`
+ * is already native and one file in memory at a time is the safe ceiling. Both halves hold for large
+ * files and neither holds for many small ones: the time there is the read from disk, one after
+ * another, and a twenty-thousand-file folder spent it twenty thousand times in a row
+ * (docs/briefs/UPLOAD-BATCH-BRIEF.md §4.8). So small files overlap, up to {@link HASH_CONCURRENCY} and
+ * {@link HASH_BYTES_IN_FLIGHT}, and a file larger than the budget waits until it can run alone — the
+ * memory ceiling for large drops is what it was. The manifest still keeps the on-disk handle, not the
+ * bytes, so the upload reads it again from disk.
+ *
+ * The result keeps the input's order. Progress counts files finished, so it still rises one at a time
+ * even though they finish out of order.
  *
  * @param files Files to hash.
  * @param onProgress Called after each file with how many are done.
- * @param signal Aborts between files.
+ * @param signal Stops starting new files once aborted.
  * @returns The same files with their checksums attached.
  * @throws DeployError When a file on disk can no longer be read.
  */
@@ -50,16 +70,63 @@ export async function hashAll(
 	onProgress?: (done: number, total: number) => void,
 	signal?: AbortSignal,
 ): Promise<ManifestFile[]> {
-	const hashed: ManifestFile[] = [];
+	const budget = byteBudget(HASH_BYTES_IN_FLIGHT);
+	let done = 0;
 
-	for (const [index, file] of files.entries()) {
-		signal?.throwIfAborted();
+	return mapInOrder(
+		files,
+		HASH_CONCURRENCY,
+		async (file) => {
+			const size = sizeOf(file.bytes);
+			await budget.acquire(size);
 
-		hashed.push({ ...file, sha256: await sha256Hex(await readForHash(file)) });
-		onProgress?.(index + 1, files.length);
-	}
+			try {
+				signal?.throwIfAborted();
 
-	return hashed;
+				const hashed: ManifestFile = { ...file, sha256: await sha256Hex(await readForHash(file)) };
+
+				done += 1;
+				onProgress?.(done, files.length);
+
+				return hashed;
+			} finally {
+				budget.release(size);
+			}
+		},
+		signal,
+	);
+}
+
+/**
+ * A count of bytes that callers reserve before reading and return after.
+ *
+ * One reservation is always admitted when nothing else is held, so a file larger than the whole budget
+ * runs — alone — instead of waiting for ever.
+ *
+ * @param limit Most bytes held at once.
+ * @returns The two operations.
+ */
+function byteBudget(limit: number): {
+	acquire: (size: number) => Promise<void>;
+	release: (size: number) => void;
+} {
+	let held = 0;
+	let waiting: Array<() => void> = [];
+
+	return {
+		async acquire(size) {
+			while (held > 0 && held + size > limit) {
+				await new Promise<void>((resolve) => waiting.push(resolve));
+			}
+			held += size;
+		},
+		release(size) {
+			held -= size;
+			const woken = waiting;
+			waiting = [];
+			for (const wake of woken) wake();
+		},
+	};
 }
 
 /**

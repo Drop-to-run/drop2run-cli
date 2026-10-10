@@ -27,6 +27,7 @@ export {
 	VIEWABLE_EXTENSIONS,
 	WEB_ASSET_EXTENSIONS,
 } from "./fileTypes.js";
+export { mapInOrder } from "./concurrency.js";
 export { hashAll, sha256Hex } from "./hash.js";
 export { shouldIgnore } from "./ignore.js";
 export {

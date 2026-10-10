@@ -193,6 +193,34 @@ export async function uploadAll(
 	// Set by the first upload to fail for good. The deploy is lost at that point, so the rest of the
 	// pool stops taking new files rather than spending minutes uploading what can never be published.
 	let failed = false;
+	// That first failure, kept so it is the one reported: the uploads it cancels fail too, a moment
+	// later, and whichever settled first used to decide what the user was told.
+	let firstFailure: unknown;
+
+	// Every upload runs under this rather than under the caller's signal, so a failure can stop the ones
+	// still in flight. Stopping only new files was not enough: an upload already on the wire carried on,
+	// and when it landed after the failure it reported progress — which the page read as the deploy
+	// being alive again, until the watchdog called a finished Worker dead (UPLOAD-BATCH-BRIEF §2.3).
+	//
+	// Linked by hand rather than with `AbortSignal.any`: the CLI and MCP run on Node 20, which gained
+	// `any` only in 20.3.
+	const local = new AbortController();
+	const forward = (): void => local.abort(signal?.reason);
+	if (signal?.aborted) local.abort(signal.reason);
+	else signal?.addEventListener("abort", forward, { once: true });
+	const inner = local.signal;
+
+	/**
+	 * Records the first failure and stops everything still running.
+	 *
+	 * @param error What failed.
+	 */
+	const fail = (error: unknown): void => {
+		if (failed) return;
+		failed = true;
+		firstFailure = error;
+		local.abort();
+	};
 
 	// The byte budget: what uploads in flight have reserved, and the workers waiting for room.
 	let reserved = 0;
@@ -233,7 +261,9 @@ export async function uploadAll(
 	 * @param path The file that just landed, or undefined for a byte-progress report.
 	 */
 	const report = (path?: string): void => {
-		if (onProgress === undefined) return;
+		// Nothing after a failure. The deploy has already been reported as failed, and a count that moves
+		// afterwards tells the page the opposite.
+		if (onProgress === undefined || failed) return;
 
 		const at = now();
 		if (path === undefined && at - lastReport < PROGRESS_INTERVAL_MS) return;
@@ -256,16 +286,17 @@ export async function uploadAll(
 			const target = targets[index];
 			if (target === undefined) return;
 
-			signal?.throwIfAborted();
+			inner.throwIfAborted();
 
 			const file = byPath.get(target.path);
 			if (file === undefined) {
-				failed = true;
-				throw new DeployError(
+				const missing = new DeployError(
 					ClientErrorCode.UploadFailed,
 					`The server asked for ${target.path}, which is not in the manifest.`,
 					{ path: target.path },
 				);
+				fail(missing);
+				throw missing;
 			}
 
 			const size = sizeOf(file.bytes);
@@ -274,13 +305,13 @@ export async function uploadAll(
 			try {
 				// Checked again after the wait: the deploy may have failed or been cancelled meanwhile.
 				if (failed) return;
-				signal?.throwIfAborted();
+				inner.throwIfAborted();
 
 				await uploadOne(target, file, {
 					put,
 					delay,
 					retries,
-					signal,
+					signal: inner,
 					uploadUrl,
 					stallMs,
 					onSent: (sent) => {
@@ -294,7 +325,7 @@ export async function uploadAll(
 					},
 				});
 			} catch (error) {
-				failed = true;
+				fail(error);
 				throw error;
 			} finally {
 				release(size);
@@ -312,8 +343,11 @@ export async function uploadAll(
 	try {
 		await Promise.all(workers);
 	} catch (error) {
-		// One failure means the deploy cannot complete, so surface the first and let the rest settle.
-		throw asDeployError(error);
+		// One failure means the deploy cannot complete. The first one is what happened; the rest are the
+		// uploads it cancelled.
+		throw asDeployError(firstFailure ?? error);
+	} finally {
+		signal?.removeEventListener("abort", forward);
 	}
 }
 
