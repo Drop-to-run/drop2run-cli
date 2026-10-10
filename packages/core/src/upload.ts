@@ -338,8 +338,20 @@ export async function uploadAll(
 					)
 				: null;
 			const size = members.reduce((sum, file) => sum + sizeOf(file.bytes), layout?.length ?? 0);
-			const label = (members[0] as ManifestFile).path;
-			await acquire(size);
+			// A batch body copies the parts that are already in memory — a zip's entries in the browser,
+			// every file of a CLI upload — because the Blob constructor copies a typed array where it only
+			// references a File. That copy is real memory for as long as the upload runs, so the budget
+			// counts it.
+			const copied = isBatch(target)
+				? members.reduce(
+						(sum, file) => sum + (file.bytes instanceof Blob ? 0 : sizeOf(file.bytes)),
+						0,
+					)
+				: 0;
+			const reservation = size + copied;
+			const first = (members[0] as ManifestFile).path;
+			const label = members.length === 1 ? first : `${first} and ${members.length - 1} more`;
+			await acquire(reservation);
 
 			try {
 				// Checked again after the wait: the deploy may have failed or been cancelled meanwhile.
@@ -371,7 +383,7 @@ export async function uploadAll(
 				fail(error);
 				throw error;
 			} finally {
-				release(size);
+				release(reservation);
 			}
 
 			inFlight.delete(index);
@@ -527,9 +539,9 @@ async function uploadBatchOne(
 		}
 
 		try {
-			// Rebuilt per attempt: a Blob is a description of its parts, not a copy of them, so this costs
-			// nothing and leaves no consumed stream behind.
-			// The parts type is spelled through the constructor because the CLI builds without DOM types,
+			// Rebuilt per attempt, so no consumed stream is left behind. A part that is a File is referenced
+			// and streamed from disk; a part that is a typed array is copied, which `uploadAll` counts
+			// against its byte budget. The parts type is spelled through the constructor because the CLI builds without DOM types,
 			// where `BlobPart` does not exist; the cast is the SharedArrayBuffer distinction `sha256Hex`
 			// explains, nothing more.
 			const body = new Blob([layout, ...members.map((file) => file.bytes)] as NonNullable<
@@ -574,14 +586,12 @@ async function uploadBatchOne(
 			}
 
 			// As for one file: a refused, expired or malformed permit, or one over its deploy's allowance,
-			// will not start working on a retry. 400 and 411 here mean the batch itself was not what its
-			// permit described, which is a bug on one side and equally final.
+			// will not start working on a retry. Each says why, because the remedies differ.
 			if ([400, 401, 403, 411, 413, 429].includes(status)) {
-				throw new DeployError(
-					ClientErrorCode.UploadFailed,
-					`Upload of ${label} was refused. The upload window may have expired — try deploying again.`,
-					{ path: first, status },
-				);
+				throw new DeployError(ClientErrorCode.UploadFailed, refusalMessage(status, label), {
+					path: first,
+					status,
+				});
 			}
 
 			lastError = new Error(`HTTP ${status}`);
@@ -602,6 +612,30 @@ async function uploadBatchOne(
 		path: first,
 		cause: describeError(lastError),
 	});
+}
+
+/**
+ * What to tell somebody whose batch the upload service refused.
+ *
+ * @param status The refusal's HTTP status.
+ * @param label The batch, named by its first file and how many more.
+ * @returns One sentence that names the likely cause and what to do.
+ */
+function refusalMessage(status: number, label: string): string {
+	switch (status) {
+		case 401:
+			return `Upload of ${label} was refused because its upload window expired. Try deploying again.`;
+		case 429:
+			return `Upload of ${label} was refused: this deploy has used every upload it was given. Try deploying again.`;
+		case 400:
+		case 411:
+		case 413:
+			// The batch did not match what its permit described — most often a file whose size changed on
+			// disk after it was read, since the layout is built from sizes measured then.
+			return `Upload of ${label} was refused because it no longer matches what was checked — a file may have changed since you dropped it. Drop the folder again.`;
+		default:
+			return `Upload of ${label} was refused by the upload service. Try deploying again.`;
+	}
 }
 
 /**
