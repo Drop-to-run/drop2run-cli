@@ -1,5 +1,5 @@
 /**
- * Batch permits: several small files sent as one request (docs/briefs/UPLOAD-BATCH-BRIEF.md).
+ * Batch permits: several small files sent as one request (docs/billing.md §9).
  *
  * The server packs small files into batches and signs, for each, the digest of a layout — one line
  * `<sha256> <size>\n` per file, in order. The client builds that same layout from the digests the server

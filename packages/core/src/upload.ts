@@ -241,7 +241,7 @@ export async function uploadAll(
 	// Every upload runs under this rather than under the caller's signal, so a failure can stop the ones
 	// still in flight. Stopping only new files was not enough: an upload already on the wire carried on,
 	// and when it landed after the failure it reported progress — which the page read as the deploy
-	// being alive again, until the watchdog called a finished Worker dead (UPLOAD-BATCH-BRIEF §2.3).
+	// being alive again, until the watchdog called a finished Worker dead (billing.md §9.2.3).
 	//
 	// Linked by hand rather than with `AbortSignal.any`: the CLI and MCP run on Node 20, which gained
 	// `any` only in 20.3.

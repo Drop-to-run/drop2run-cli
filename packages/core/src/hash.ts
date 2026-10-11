@@ -51,7 +51,7 @@ const HASH_BYTES_IN_FLIGHT = 16 * 1024 * 1024;
  * is already native and one file in memory at a time is the safe ceiling. Both halves hold for large
  * files and neither holds for many small ones: the time there is the read from disk, one after
  * another, and a twenty-thousand-file folder spent it twenty thousand times in a row
- * (docs/briefs/UPLOAD-BATCH-BRIEF.md §4.8). So small files overlap, up to {@link HASH_CONCURRENCY} and
+ * (docs/billing.md §9.4.8). So small files overlap, up to {@link HASH_CONCURRENCY} and
  * {@link HASH_BYTES_IN_FLIGHT}, and a file larger than the budget waits until it can run alone — the
  * memory ceiling for large drops is what it was. The manifest still keeps the on-disk handle, not the
  * bytes, so the upload reads it again from disk.

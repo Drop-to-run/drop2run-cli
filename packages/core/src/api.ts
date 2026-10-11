@@ -53,7 +53,7 @@ export interface PrepareResponse {
 	/** Public URL of the site. Sent only alongside `unchanged`, which ends the deploy there. */
 	readonly url?: string;
 	/**
-	 * Batch permits, each covering several small files sent as one body (docs/briefs/UPLOAD-BATCH-BRIEF.md).
+	 * Batch permits, each covering several small files sent as one body (docs/billing.md §9).
 	 *
 	 * Optional because an API released before batches never sends it — and an API that does sends an
 	 * empty list unless batches were asked for and are switched on. A file is in `upload` or here, never
