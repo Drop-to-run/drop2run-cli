@@ -61,6 +61,15 @@ export interface PrepareResponse {
 	 * queue ahead of it in exactly that order.
 	 */
 	readonly batches?: readonly UploadBatch[];
+	/**
+	 * How many batches to send at once, set by the server so it can be tuned without a client release.
+	 *
+	 * Each batch request may hold only six R2 writes open on the upload Worker, so batches in flight are
+	 * what decide how fast a deploy of many small files goes (measured 11/10: 256 files a batch took 9 s at
+	 * six writes). Absent from an API that predates it, and null when no batches were sent; the client then
+	 * keeps its default.
+	 */
+	readonly batchConcurrency?: number | null;
 }
 
 /** Response of `POST /sites/{siteId}/deploys/{deployId}/complete`. */

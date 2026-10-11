@@ -19,8 +19,17 @@ import {
  * client to alter and nothing for it to sign.
  */
 
-/** How many uploads run at once. */
+/** How many single-file uploads run at once. */
 const DEFAULT_CONCURRENCY = 8;
+
+/**
+ * Most batches in flight that any server answer can ask for.
+ *
+ * The server sets the number (`batchConcurrency` in the prepare response); this is only the ceiling a
+ * misconfigured or hostile answer cannot pass. Memory stays bounded either way by
+ * {@link DEFAULT_BYTES_IN_FLIGHT}, which every batch reserves its body against.
+ */
+const MAX_BATCH_CONCURRENCY = 64;
 
 /**
  * Most bytes in flight at once, across every upload in the pool.
@@ -135,8 +144,16 @@ export interface UploadDeps {
 	readonly fetch?: typeof fetch;
 	/** Waits before a retry. Defaults to a real timer. */
 	readonly delay?: (ms: number) => Promise<void>;
-	/** How many uploads run at once. */
+	/** How many single-file uploads run at once. */
 	readonly concurrency?: number;
+	/**
+	 * How many batches run at once, apart from single files. Defaults to {@link concurrency}.
+	 *
+	 * Separate because the two are limited by different things: a single file can be tens of megabytes
+	 * and is limited by the connection, while a batch of small files is limited by the upload Worker's six
+	 * R2 writes per request — so more batches at once is what makes many small files go faster.
+	 */
+	readonly batchConcurrency?: number;
 	/** Most bytes in flight at once. See {@link DEFAULT_BYTES_IN_FLIGHT}. */
 	readonly maxBytesInFlight?: number;
 	/** How many times one file is retried. */
@@ -196,6 +213,10 @@ export async function uploadAll(
 	const put = deps.put ?? defaultTransport(deps.fetch);
 	const delay = deps.delay ?? defaultDelay;
 	const concurrency = deps.concurrency ?? DEFAULT_CONCURRENCY;
+	const batchConcurrency = Math.max(
+		1,
+		Math.min(MAX_BATCH_CONCURRENCY, Math.floor(deps.batchConcurrency ?? concurrency)),
+	);
 	const retries = deps.retries ?? DEFAULT_RETRIES;
 	const stallMs = deps.stallMs ?? DEFAULT_STALL_MS;
 	const now = deps.now ?? Date.now;
@@ -269,6 +290,38 @@ export async function uploadAll(
 		waiting = [];
 		for (const wake of woken) wake();
 	};
+	// Uploads in flight of each kind, against their own limits. The pool has a worker for the larger of the
+	// two, so a worker that picks up a single file while eight are already running waits here for one to
+	// finish rather than running a ninth. Singles come first in the queue, so in practice the wait happens
+	// only before the batches start.
+	const running = { single: 0, batch: 0 };
+	const limit = { single: concurrency, batch: batchConcurrency };
+	let slotWaiting: Array<() => void> = [];
+
+	/**
+	 * Waits until another upload of this kind may start, then counts it.
+	 *
+	 * @param kind Whether the upload is a batch or a single file.
+	 */
+	const takeSlot = async (kind: "single" | "batch"): Promise<void> => {
+		while (running[kind] >= limit[kind]) {
+			await new Promise<void>((resolve) => slotWaiting.push(resolve));
+		}
+		running[kind] += 1;
+	};
+
+	/**
+	 * Frees an upload's slot and wakes every waiter to try again.
+	 *
+	 * @param kind Whether the upload was a batch or a single file.
+	 */
+	const freeSlot = (kind: "single" | "batch"): void => {
+		running[kind] -= 1;
+		const woken = slotWaiting;
+		slotWaiting = [];
+		for (const wake of woken) wake();
+	};
+
 	// Bytes of files that have landed, plus — separately, because an attempt can be abandoned and its
 	// bytes then stop counting — what each upload still in flight has sent so far.
 	let landedBytes = 0;
@@ -351,6 +404,8 @@ export async function uploadAll(
 			const reservation = size + copied;
 			const first = (members[0] as ManifestFile).path;
 			const label = members.length === 1 ? first : `${first} and ${members.length - 1} more`;
+			const kind = isBatch(target) ? "batch" : "single";
+			await takeSlot(kind);
 			await acquire(reservation);
 
 			try {
@@ -384,6 +439,7 @@ export async function uploadAll(
 				throw error;
 			} finally {
 				release(reservation);
+				freeSlot(kind);
 			}
 
 			inFlight.delete(index);
@@ -393,7 +449,10 @@ export async function uploadAll(
 		}
 	};
 
-	const workers = Array.from({ length: Math.min(concurrency, targets.length) }, worker);
+	const workers = Array.from(
+		{ length: Math.min(Math.max(concurrency, batchConcurrency), targets.length) },
+		worker,
+	);
 
 	try {
 		await Promise.all(workers);

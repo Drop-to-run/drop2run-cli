@@ -173,7 +173,12 @@ export async function deploy(
 					...(path === undefined ? {} : { path }),
 				}),
 			signal,
-			options.upload,
+			// The server's number unless the caller set one: it is tuned on the server so a deploy of many
+			// small files speeds up without a CLI or MCP release.
+			typeof prepared.batchConcurrency === "number" &&
+				options.upload?.batchConcurrency === undefined
+				? { ...options.upload, batchConcurrency: prepared.batchConcurrency }
+				: options.upload,
 			(path, attempt, attempts, stalled) =>
 				onProgress({ type: "retrying", path, attempt, attempts, stalled }),
 		);
