@@ -26,6 +26,7 @@ export { mapInOrder } from "./concurrency.js";
 export {
 	DOCUMENT_EXTENSIONS,
 	EDITABLE_EXTENSIONS,
+	EDITABLE_NAMES,
 	extensionOf,
 	FILE_TYPES,
 	type FileKind,

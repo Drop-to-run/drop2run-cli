@@ -616,6 +616,19 @@ export const READER_EXTENSIONS: readonly string[] = extensionsWhere((type) => ty
 export const EDITABLE_EXTENSIONS: readonly string[] = extensionsWhere((type) => type.editable);
 
 /**
+ * Files with no extension the editor opens anyway, named in full as paths from the deploy root.
+ *
+ * <b>Names, not "no extension".</b> Opening every extensionless file would take in `LICENSE` and also any
+ * binary that happens to lack an extension, and a binary edited as text is destroyed on save — the danger
+ * {@link EDITABLE_EXTENSIONS} describes. These are the configuration files the platform itself reads, and
+ * only where it reads them: a `_redirects` in a subfolder is an ordinary file, so it stays closed.
+ *
+ * ⚠️ Mirrored by `GetDeployFile._editableNames` in `apps/api`, which enforces it; `FileTypeTableTests`
+ * holds the two together.
+ */
+export const EDITABLE_NAMES: readonly string[] = ["_redirects"];
+
+/**
  * Extensions whose presence means the drop is the inside of a website rather than a set of pictures.
  *
  * <b>The guard on {@link GALLERY_EXTENSIONS}, and the reason a folder of images can be published at
