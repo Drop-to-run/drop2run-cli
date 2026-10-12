@@ -38,6 +38,7 @@ export type FileKind =
 	| "html"
 	| "docx"
 	| "xlsx"
+	| "csv"
 	| "epub"
 	| "binary";
 
@@ -179,7 +180,7 @@ export const FILE_TYPES: readonly FileType[] = [
 	{
 		ext: ".csv",
 		mime: "text/csv; charset=utf-8",
-		kind: "text",
+		kind: "csv",
 		document: false,
 		reader: true,
 		editable: true,
