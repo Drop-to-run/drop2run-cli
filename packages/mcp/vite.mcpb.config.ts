@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
+import { ALIASES } from "./aliases.js";
 
 /**
  * Bundles the server into one file for an MCP Bundle (`.mcpb`).
@@ -21,10 +22,7 @@ import { defineConfig } from "vite";
  */
 export default defineConfig({
 	resolve: {
-		alias: {
-			"@drop2run/core": fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
-			"@drop2run/node": fileURLToPath(new URL("../node/src/index.ts", import.meta.url)),
-		},
+		alias: ALIASES,
 	},
 	ssr: {
 		noExternal: true,

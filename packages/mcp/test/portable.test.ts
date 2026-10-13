@@ -2,7 +2,7 @@ import { builtinModules } from "node:module";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
 import { describe, expect, it } from "vitest";
-import config from "../vite.config.js";
+import { ALIASES } from "../aliases.js";
 
 /**
  * `tools.ts` reaches nothing a Worker does not have.
@@ -31,7 +31,7 @@ async function builtinsReachedFrom(entry: string): Promise<string[]> {
 	await build({
 		configFile: false,
 		logLevel: "silent",
-		resolve: { alias: config.resolve?.alias ?? [] },
+		resolve: { alias: ALIASES },
 		build: {
 			write: false,
 			lib: {

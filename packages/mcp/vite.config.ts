@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
+import { ALIASES } from "./aliases.js";
 
 /**
  * Bundles the server into `dist/index.js` for node.
@@ -19,22 +20,7 @@ import { defineConfig } from "vite";
  */
 export default defineConfig({
 	resolve: {
-		// Exact matches, as a list: a string key also matches as a prefix, so "@drop2run/node" would turn
-		// "@drop2run/node/portable" into ".../index.ts/portable".
-		alias: [
-			{
-				find: /^@drop2run\/core$/,
-				replacement: fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
-			},
-			{
-				find: /^@drop2run\/node$/,
-				replacement: fileURLToPath(new URL("../node/src/index.ts", import.meta.url)),
-			},
-			{
-				find: /^@drop2run\/node\/portable$/,
-				replacement: fileURLToPath(new URL("../node/src/portable.ts", import.meta.url)),
-			},
-		],
+		alias: ALIASES,
 	},
 	build: {
 		ssr: true,
