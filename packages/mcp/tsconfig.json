@@ -17,7 +17,8 @@
 		"noEmit": true,
 		"paths": {
 			"@drop2run/core": ["../core/src/index.ts"],
-			"@drop2run/node": ["../node/src/index.ts"]
+			"@drop2run/node": ["../node/src/index.ts"],
+			"@drop2run/node/portable": ["../node/src/portable.ts"]
 		}
 	},
 	"include": ["src", "test"]

@@ -12,66 +12,23 @@
  *
  * This is a deviation from the brief's §3, which lists only `core`, `cli`, `mcp` and `action`. The
  * deviation is the discovery that "portable" and "not a browser" are different things.
+ *
+ * Not everything here needs the disk, though: the API client and publishing written files do not, and
+ * the remote MCP Worker needs exactly those. They live behind `./portable.js`, re-exported whole below,
+ * so this entry still offers everything it did.
  */
 
 export {
-	type AccessToken,
-	type CommentAudience,
-	type CommentPage,
-	type CommentPlace,
-	type CommentQuery,
-	type CommentThread,
-	createSite,
-	deleteSite,
-	findSite,
-	getSite,
-	type Invitation,
-	invitePeople,
-	listComments,
-	listFolders,
-	listPeople,
-	listSites,
-	listTokens,
-	lookUpSite,
-	type PersonRole,
-	type PromotedDeploy,
-	promoteDeploy,
-	ROOT_FOLDER,
-	readInvitedOnly,
-	removePerson,
-	replyToComment,
-	resolveFolder,
-	resolveFolderTarget,
-	type ServingMode,
-	type SiteDetail,
-	type SiteFolder,
-	type SiteListing,
-	type SitePauseState,
-	type SitePeople,
-	type SitePerson,
-	type SiteSettings,
-	type SiteSettingsChange,
-	type SiteSummary,
-	type SiteVersion,
-	setCommentResolved,
-	setSitePaused,
-	type ThreadComment,
-	updateSiteSettings,
-} from "./api.js";
-export {
 	type CredentialSurface,
-	type Credentials,
 	clearToken,
 	configPath,
-	DEFAULT_API_BASE_URL,
-	dashboardUrlFor,
 	loadCredentials,
 	missingCredentialsMessage,
 	resolveApiBaseUrl,
 	saveToken,
 	TOKEN_VARIABLE,
 } from "./config.js";
-export { accessOf, describeSite, servingModeOf } from "./describe.js";
+export { publishDirectory } from "./directory.js";
 export {
 	type Attempt,
 	type Callback,
@@ -89,6 +46,7 @@ export {
 	startDevice,
 	waitForCallback,
 } from "./login.js";
+export * from "./portable.js";
 export {
 	PROJECT_FILE,
 	type Project,
@@ -96,13 +54,4 @@ export {
 	readProject,
 	writeProject,
 } from "./project.js";
-export {
-	type AuthoredFile,
-	describeMode,
-	type NewSite,
-	type PublishResult,
-	publish,
-	publishDirectory,
-	publishFiles,
-} from "./publish.js";
 export { directorySource } from "./source.js";

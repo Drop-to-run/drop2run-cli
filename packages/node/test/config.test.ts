@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-	DEFAULT_API_BASE_URL,
-	loadCredentials,
-	missingCredentialsMessage,
-	TOKEN_VARIABLE,
-} from "../src/config.js";
+import { loadCredentials, missingCredentialsMessage, TOKEN_VARIABLE } from "../src/config.js";
+import { DEFAULT_API_BASE_URL } from "../src/credentials.js";
 
 /**
  * Where the token comes from, and what happens when it comes from nowhere.

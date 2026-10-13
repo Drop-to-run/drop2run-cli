@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Credentials } from "../src/config.js";
-import { describeMode, publishDirectory, publishFiles } from "../src/publish.js";
+import type { Credentials } from "../src/credentials.js";
+import { publishDirectory } from "../src/directory.js";
+import { describeMode, publishFiles } from "../src/publish.js";
 
 /**
  * Which site a publish goes to, and what the request carries.

@@ -19,10 +19,22 @@ import { defineConfig } from "vite";
  */
 export default defineConfig({
 	resolve: {
-		alias: {
-			"@drop2run/core": fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
-			"@drop2run/node": fileURLToPath(new URL("../node/src/index.ts", import.meta.url)),
-		},
+		// Exact matches, as a list: a string key also matches as a prefix, so "@drop2run/node" would turn
+		// "@drop2run/node/portable" into ".../index.ts/portable".
+		alias: [
+			{
+				find: /^@drop2run\/core$/,
+				replacement: fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
+			},
+			{
+				find: /^@drop2run\/node$/,
+				replacement: fileURLToPath(new URL("../node/src/index.ts", import.meta.url)),
+			},
+			{
+				find: /^@drop2run\/node\/portable$/,
+				replacement: fileURLToPath(new URL("../node/src/portable.ts", import.meta.url)),
+			},
+		],
 	},
 	build: {
 		ssr: true,

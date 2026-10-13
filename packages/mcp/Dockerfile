@@ -15,7 +15,7 @@
 # resolve them — the bundler folds both into dist/index.js and needs their sources present to do it.
 #
 # Introspection works without a credential on purpose. Every tool refuses without a token, but the
-# token is read per call rather than at boot (see src/server.ts), so a client — or a directory's
+# token is read per call rather than at boot (see src/tools.ts), so a client — or a directory's
 # checker — can connect and list the three tools without one. A server that exited at startup for a
 # missing token would fail this check while working perfectly for its users.
 #

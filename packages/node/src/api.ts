@@ -1,4 +1,4 @@
-import { type Credentials, dashboardUrlFor } from "./config.js";
+import { type Credentials, dashboardUrlFor } from "./credentials.js";
 
 /**
  * The control-plane calls this server makes that the engine does not.

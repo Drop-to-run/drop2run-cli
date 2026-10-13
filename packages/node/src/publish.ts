@@ -1,4 +1,3 @@
-import { stat } from "node:fs/promises";
 import {
 	type DeploySource,
 	deploy,
@@ -8,14 +7,17 @@ import {
 	type ServingMode,
 } from "@drop2run/core";
 import { createSite, lookUpSite, resolveFolder, type SiteSummary } from "./api.js";
-import type { Credentials } from "./config.js";
-import { directorySource } from "./source.js";
+import type { Credentials } from "./credentials.js";
 
 /**
  * One publish, from a folder or a single page to a live URL.
  *
  * Sits between a command — an MCP tool or a CLI subcommand — and the engine, and exists to hold the
  * one decision each of them would otherwise make differently: which site a publish goes to.
+ *
+ * Nothing here touches a disk: a folder is published by `directory.ts`, which hands this module a
+ * source. That keeps {@link publishFiles} importable where there is no filesystem — the remote MCP
+ * Worker publishes what a hosted chat wrote, through the same code the local server uses.
  */
 
 /** What a publish reports back to the chat. */
@@ -240,38 +242,6 @@ export async function publish(
 		mode,
 		nestedIndex: mode === "docs" ? nestedIndexOf(paths) : null,
 	};
-}
-
-/**
- * Publishes a directory.
- *
- * <b>The folder is checked before anything is created.</b> The engine reads files only after it has a
- * site to publish them to, so a path that does not exist used to fail *after* a site had been made for
- * it — leaving an empty site behind and, when a subdomain was asked for, that name taken by it. The
- * second attempt then failed as "already taken" by the wreckage of the first. One `stat` ahead of the
- * request is the whole fix: nothing is created for a publish that cannot happen.
- *
- * @param credentials Token and base URL.
- * @param directory Absolute path of the folder to publish.
- * @param site Subdomain or site id, or undefined for a new site.
- * @param onProgress Receives every stage the engine reports. See {@link publish}.
- * @param newSite Name and folder for the site this creates. See {@link publish}.
- * @returns What to tell the caller.
- * @throws Error when the path does not exist or is not a directory.
- */
-export async function publishDirectory(
-	credentials: Credentials,
-	directory: string,
-	site?: string,
-	onProgress?: ProgressListener,
-	newSite: NewSite = {},
-): Promise<PublishResult> {
-	const found = await stat(directory).catch(() => null);
-
-	if (found === null) throw new Error(`There is no folder at ${directory}.`);
-	if (!found.isDirectory()) throw new Error(`${directory} is a file, not a folder to publish.`);
-
-	return await publish(credentials, directorySource(directory), site, onProgress, newSite);
 }
 
 /** One file a caller wrote, rather than one read off a disk. */

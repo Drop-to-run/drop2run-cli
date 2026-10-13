@@ -2,13 +2,8 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-	clearToken,
-	DEFAULT_API_BASE_URL,
-	dashboardUrlFor,
-	resolveApiBaseUrl,
-	saveToken,
-} from "../src/config.js";
+import { clearToken, resolveApiBaseUrl, saveToken } from "../src/config.js";
+import { DEFAULT_API_BASE_URL, dashboardUrlFor } from "../src/credentials.js";
 
 /**
  * Writing and removing the stored token.
