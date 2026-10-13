@@ -99,7 +99,10 @@ describe("the remote tool surface", () => {
 		const instructions = client.getInstructions() ?? "";
 		const publish = (await client.listTools()).tools.find((tool) => tool.name === "publish_files");
 
-		expect(instructions).toContain("Only text can be published here");
+		// Any text, not a closed list: a model told "HTML, CSS, …, CSV" could refuse a .py that publishes fine.
+		expect(instructions).toContain("Any text file can be published here");
+		expect(instructions).toContain("source code in any language");
+		expect(instructions).toContain("Binary files cannot");
 		expect(instructions).toContain("Never ask the person for a token");
 		expect(instructions).not.toContain(".pdf");
 		expect(publish?.description).toContain("cannot publish a PDF, an image or an Office file");

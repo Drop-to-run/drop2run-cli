@@ -674,9 +674,12 @@ export function instructionsFor(surface: Surface): string {
 					"page goes at index.html, and a single note is a whole publish that needs no wrapping in",
 					"HTML.",
 					"",
-					"Only text can be published here: HTML, CSS, JavaScript, Markdown, SVG, JSON, CSV. An",
-					"image, a PDF or an Office file cannot go through this connector — say so rather than",
-					"encoding one as text.",
+					"Any text file can be published here: HTML, CSS, JavaScript, Markdown, SVG, JSON, YAML,",
+					"CSV, plain text, and source code in any language (.py, .ts, .go, .sql and the like). In a",
+					"documents site, source code opens in the viewer with highlighting, so code meant to be",
+					"read goes beside a README.md rather than an index.html. Binary files cannot: an image, a",
+					"PDF or an Office file cannot go through this connector — say so rather than encoding one",
+					"as text.",
 					"",
 					"This connector is signed in to Drop2Run by the chat client, which asks the person when",
 					"it needs to. Never ask the person for a token or paste one into a tool.",
@@ -723,14 +726,14 @@ export function instructionsFor(surface: Surface): string {
  */
 function publishFilesDescription(surface: Surface): string {
 	return surface === "local"
-		? "Publishes one or more files written here — markdown, HTML, CSS, JSON — as a site, and " +
-				"returns its URL. A single page goes at index.html; a single .md, .markdown or .pdf file " +
-				"is a site on its own, served through the documents viewer. Text only: a PDF or an image " +
-				"has to be published from disk with publish_dir."
-		: "Publishes one or more files written here — markdown, HTML, CSS, JSON — as a site, and " +
-				"returns its URL. A single page goes at index.html; a single .md or .markdown file is a " +
-				"site on its own, served through the documents viewer. Text only: this connector cannot " +
-				"publish a PDF, an image or an Office file.";
+		? "Publishes one or more files written here — markdown, HTML, CSS, JSON, source code, any " +
+				"text — as a site, and returns its URL. A single page goes at index.html; a single .md, " +
+				".markdown or .pdf file is a site on its own, served through the documents viewer. Text " +
+				"only: a PDF or an image has to be published from disk with publish_dir."
+		: "Publishes one or more files written here — markdown, HTML, CSS, JSON, source code, any " +
+				"text — as a site, and returns its URL. A single page goes at index.html; a single .md or " +
+				".markdown file is a site on its own, served through the documents viewer. Text only: " +
+				"this connector cannot publish a PDF, an image or an Office file.";
 }
 
 /**
