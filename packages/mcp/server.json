@@ -26,5 +26,11 @@
 				"type": "stdio"
 			}
 		}
+	],
+	"remotes": [
+		{
+			"type": "streamable-http",
+			"url": "https://mcp.dropto.run/mcp"
+		}
 	]
 }
