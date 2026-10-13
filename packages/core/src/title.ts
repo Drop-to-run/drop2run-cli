@@ -99,7 +99,11 @@ export async function readSiteName(files: readonly CollectedFile[]): Promise<str
  * @returns The decoded head of the document.
  */
 function decodeHead(bytes: Uint8Array): string {
-	return new TextDecoder("utf-8", { fatal: false }).decode(bytes.subarray(0, HEAD_BYTES));
+	// `ignoreBOM` spelled out at its default: the Workers runtime's typings require it, and this module is
+	// bundled into the remote MCP Worker as well as the browser.
+	return new TextDecoder("utf-8", { fatal: false, ignoreBOM: false }).decode(
+		bytes.subarray(0, HEAD_BYTES),
+	);
 }
 
 /**

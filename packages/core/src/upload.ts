@@ -813,14 +813,16 @@ export function xhrTransport(Xhr: XhrConstructor): PutTransport {
 			const settle = (finish: () => void): void => {
 				if (settled) return;
 				settled = true;
-				clearTimeout(timer);
+				// Guarded rather than passed undefined: the Workers typings refuse that, and this module is
+				// type-checked inside the remote MCP Worker too.
+				if (timer !== undefined) clearTimeout(timer);
 				signal?.removeEventListener("abort", onAbort);
 				finish();
 			};
 
 			/** Restarts the idle timer. */
 			const arm = (): void => {
-				clearTimeout(timer);
+				if (timer !== undefined) clearTimeout(timer);
 				timer = setTimeout(() => {
 					xhr.abort();
 					settle(() => reject(new StalledError(Math.round(stallMs / 1000))));
