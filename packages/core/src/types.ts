@@ -124,7 +124,23 @@ export interface CollectedFile {
 export function sizeOf(content: FileContent): number {
 	// `ArrayBuffer.isView` rather than `instanceof Uint8Array`: a test environment can hand over a typed
 	// array from another realm, and `instanceof` is false for every one of those.
-	return ArrayBuffer.isView(content) ? content.byteLength : content.size;
+	if (ArrayBuffer.isView(content)) return content.byteLength;
+	// Typed out, but a plain-JS caller can still hand over a bare ArrayBuffer, which has `byteLength` and
+	// no `size`. Reading `.size` off it gave `undefined`, JSON drops an undefined field, and the API bound
+	// the missing size as 0: a manifest of real digests declared empty, refused only at `complete`.
+	if (isArrayBuffer(content)) return content.byteLength;
+	if (typeof content.size === "number") return content.size;
+	throw new TypeError("File contents must be a Uint8Array, an ArrayBuffer or a Blob.");
+}
+
+/**
+ * Whether a value is an ArrayBuffer, from this realm or another.
+ *
+ * @param value Anything.
+ * @returns True for an ArrayBuffer.
+ */
+function isArrayBuffer(value: unknown): value is ArrayBuffer {
+	return Object.prototype.toString.call(value) === "[object ArrayBuffer]";
 }
 
 /**
@@ -134,9 +150,10 @@ export function sizeOf(content: FileContent): number {
  * @returns The bytes. In-memory contents come back as they are, not copied.
  */
 export async function bytesOf(content: FileContent): Promise<Uint8Array> {
-	return ArrayBuffer.isView(content)
-		? (content as Uint8Array)
-		: new Uint8Array(await content.arrayBuffer());
+	if (ArrayBuffer.isView(content)) return content as Uint8Array;
+	// The same bare ArrayBuffer `sizeOf` measures, which has no `arrayBuffer()` to call.
+	if (isArrayBuffer(content)) return new Uint8Array(content);
+	return new Uint8Array(await content.arrayBuffer());
 }
 
 /** One file after hashing, in the shape the API's manifest expects. */
