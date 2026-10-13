@@ -1,10 +1,29 @@
 # @drop2run/mcp
 
-An MCP server that lets any MCP client — Claude, Cursor, VS Code, Codex, Gemini CLI — publish what it made to
+An MCP server that lets any MCP client — Claude, ChatGPT, Cursor, VS Code, Codex, Gemini CLI — publish what it made to
 [Drop2Run](https://dropto.run): an HTML page, a markdown note, a folder of documents or a built site. It
 returns a live HTTPS URL.
 
 Full documentation at [dropto.run/docs/mcp](https://dropto.run/docs/mcp).
+
+## In a chat on the web — no package at all
+
+Claude on the web and on a phone, ChatGPT and other hosted chats cannot run this package, so the same
+tools are hosted at a URL:
+
+```
+https://mcp.dropto.run/mcp
+```
+
+**Claude** — open
+[this link](https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Drop2Run&connectorUrl=https%3A%2F%2Fmcp.dropto.run%2Fmcp),
+or *Settings → Connectors → Add custom connector* and paste the URL, then sign in to Drop2Run when asked.
+**Claude Code** — `claude mcp add --transport http drop2run https://mcp.dropto.run/mcp`. **ChatGPT** — add
+it as a custom connector, where your plan offers developer mode.
+
+The hosted server has no `login` / `login_code` (the chat signs in for it) and no `publish_dir` (there is
+no disk), and `publish_files` takes text files only. For a folder on disk, a PDF or an image, run the
+package below.
 
 ## Setup
 

@@ -37,6 +37,11 @@ and there is no config file and nothing to install first. Claude Code takes one 
 claude mcp add drop2run -s user -- npx -y @drop2run/mcp
 ```
 
+A chat that cannot run a package — Claude on the web or a phone, ChatGPT — adds the hosted copy of the
+same server by URL instead, `https://mcp.dropto.run/mcp`, and signs in to Drop2Run when it connects. Its
+tools come from `packages/mcp` here (`src/remote.ts`); the sign-in in front of them does not. It
+publishes text files only, and the setup is at [dropto.run/docs/mcp](https://dropto.run/docs/mcp).
+
 It exposes `publish_files`, `publish_dir`, `list_sites`, `list_folders`, `delete_site`, `get_site`,
 `update_site`, `pause_site`, `resume_site` and `rollback_site`, and `login` / `login_code` to get a
 token without leaving the chat. The publishes answer with structured fields
