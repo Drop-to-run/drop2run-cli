@@ -141,7 +141,7 @@ export interface ApiOptions {
 	 * Extra headers for every call to the control plane, and only those — never an upload, for the reason
 	 * {@link token} gives. The remote MCP Worker sends its service key this way, which the API and the
 	 * zone's firewall read to tell its calls apart from every other Worker's, all of which arrive from the
-	 * same Cloudflare address (docs/briefs/REMOTE-MCP-BRIEF.md §4.3).
+	 * same Cloudflare address (docs/remote-mcp.md §4.3).
 	 */
 	readonly headers?: Readonly<Record<string, string>>;
 	/** Overridable for tests. Defaults to the global `fetch`. */

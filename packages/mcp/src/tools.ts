@@ -578,7 +578,7 @@ export function describe(result: PublishResult): string {
  *
  * Decides only the sentences that would be false on the other one. `local` can read a folder off the disk
  * (`publish_dir`) and sign itself in (`login`); `remote` has no disk, is signed in by the chat client, and
- * takes text only (REMOTE-MCP-BRIEF.md D10).
+ * takes text only (docs/remote-mcp.md D10).
  */
 export type Surface = "local" | "remote";
 

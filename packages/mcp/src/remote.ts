@@ -9,7 +9,7 @@ import { createRemoteServer } from "./tools.js";
  * Worker resolves one copy of it — this package's — and `test/portable.test.ts` checks the whole graph the
  * Worker bundles. The Worker's job is OAuth: it decides whose token this request carries and hands it over.
  *
- * <b>Stateless, JSON responses.</b> The 2025-11-25 transport in its stateless form (REMOTE-MCP-BRIEF.md D6):
+ * <b>Stateless, JSON responses.</b> The 2025-11-25 transport in its stateless form (docs/remote-mcp.md D6):
  * no session id, no server-sent stream, a fresh server per request. A Worker cannot hold a session between
  * requests anyway, and every tool here is one call to the API that finishes before the response is written.
  */

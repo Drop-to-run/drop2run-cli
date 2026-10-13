@@ -2,7 +2,7 @@
  * The parts of `@drop2run/node` that run where there is no disk: the API client, the wording that
  * describes a site, and publishing files that were written rather than read.
  *
- * <b>Why an entry of its own.</b> The remote MCP Worker (docs/briefs/REMOTE-MCP-BRIEF.md §4.1) serves the
+ * <b>Why an entry of its own.</b> The remote MCP Worker (docs/remote-mcp.md §4.1) serves the
  * same tools as the local server, and a Worker has no home directory and no config file. Importing the
  * package's main entry would pull `config.ts` in, and with it `node:fs` — a bundle that either fails to
  * build or carries a stub that fails at the first call. Everything exported here reaches nothing in
