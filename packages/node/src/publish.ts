@@ -180,6 +180,7 @@ export async function publish(
 	let mode: ServingMode | null = null;
 	let paths: readonly string[] = [];
 	let failure: string | null = null;
+	let failureCode: string | undefined;
 	let failureDetail: unknown;
 
 	// The engine reports through a listener rather than returning, because a browser draws a progress
@@ -197,6 +198,9 @@ export async function publish(
 		}
 		if (event.type === "error") {
 			failure = event.message;
+			// The stable code too, so a caller can tell a refused token (`invalid_token`) from a refused
+			// publish without reading the sentence. See isTokenRefused.
+			failureCode = event.code;
 			// Kept alongside the message, because the message alone is unactionable for the failure that
 			// happens most: "could not upload x after 4 attempts" names the file and not the status, and
 			// the status is the whole of what somebody needs. The engine puts it here; this is what stops
@@ -226,9 +230,10 @@ export async function publish(
 		// why rather than only what.
 		const thrown = new Error(
 			failure ?? (error instanceof Error ? error.message : String(error)),
-		) as Error & { detail?: unknown };
+		) as Error & { detail?: unknown; code?: string | undefined };
 
 		thrown.detail = failureDetail ?? (error as { detail?: unknown } | null)?.detail;
+		thrown.code = failureCode ?? (error as { code?: string } | null)?.code;
 
 		throw thrown;
 	});

@@ -57,6 +57,10 @@ describe("the module both servers share", () => {
 		expect(await builtinsReachedFrom("src/tools.ts")).toEqual([]);
 	}, 60_000);
 
+	it("and neither does the HTTP entry the Worker imports, transport included", async () => {
+		expect(await builtinsReachedFrom("src/remote.ts")).toEqual([]);
+	}, 60_000);
+
 	it("is checked by a test that can see one when it is there", async () => {
 		// The stdio server reads a config file, so its graph must show up here. Without this, a bundle
 		// that silently resolved nothing would pass the test above for the wrong reason.

@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { serveRemote } from "../src/remote.js";
 import { createServer } from "../src/server.js";
 import { createRemoteServer } from "../src/tools.js";
 
@@ -45,10 +46,10 @@ async function connect(server: McpServer): Promise<Client> {
  */
 async function connectSignedOut(): Promise<Client> {
 	return connect(
-		createRemoteServer(
-			() => null,
-			() => "Reconnect the connector.",
-		),
+		createRemoteServer({
+			credentials: () => null,
+			missingCredentials: () => "Reconnect the connector.",
+		}),
 	);
 }
 
@@ -124,7 +125,9 @@ describe("a remote call", () => {
 		);
 		vi.stubGlobal("fetch", fetch);
 
-		const client = await connect(createRemoteServer(credentials, () => "unused"));
+		const client = await connect(
+			createRemoteServer({ credentials, missingCredentials: () => "unused" }),
+		);
 		await client.callTool({ name: "list_sites", arguments: {} });
 		await client.callTool({ name: "list_sites", arguments: {} });
 
@@ -132,5 +135,104 @@ describe("a remote call", () => {
 		const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
 		expect(url.startsWith("https://api.test/api/")).toBe(true);
 		expect(new Headers(init.headers).get("authorization")).toBe("Bearer d2r_remote");
+	});
+});
+
+/** The token every HTTP test below speaks with. */
+const TOKEN = { token: "d2r_remote_secret", apiBaseUrl: "https://api.test/api" };
+
+/**
+ * One JSON-RPC message as a chat client posts it to the remote server.
+ *
+ * @param method The JSON-RPC method.
+ * @param params Its parameters.
+ * @returns The request.
+ */
+function rpc(method: string, params: Record<string, unknown> = {}): Request {
+	return new Request("https://mcp.test/mcp", {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			accept: "application/json, text/event-stream",
+		},
+		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+	});
+}
+
+/**
+ * Stubs the API with one answer for every call.
+ *
+ * @param status The status every call answers with.
+ * @param body The JSON body.
+ */
+function apiAnswers(status: number, body: unknown): void {
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(
+			async () =>
+				new Response(JSON.stringify(body), {
+					status,
+					headers: { "content-type": "application/json" },
+				}),
+		),
+	);
+}
+
+describe("the remote server over HTTP", () => {
+	it("answers initialize with JSON, statelessly", async () => {
+		const { response, tokenRefused } = await serveRemote(
+			rpc("initialize", {
+				protocolVersion: "2025-11-25",
+				capabilities: {},
+				clientInfo: { name: "test", version: "0" },
+			}),
+			TOKEN,
+			() => "unused",
+		);
+
+		expect(response.status).toBe(200);
+		expect(response.headers.get("content-type")).toContain("application/json");
+		expect(response.headers.get("mcp-session-id")).toBeNull();
+		expect(tokenRefused).toBe(false);
+
+		const body = (await response.json()) as { result: { serverInfo: { name: string } } };
+		expect(body.result.serverInfo.name).toBe("drop2run");
+	});
+
+	it("says the token was refused when the API answers 401, so the Worker can answer 401 too", async () => {
+		apiAnswers(401, { type: "invalid_token", detail: "This access token is not valid." });
+
+		const { tokenRefused } = await serveRemote(
+			rpc("tools/call", { name: "list_sites", arguments: {} }),
+			TOKEN,
+			() => "unused",
+		);
+
+		expect(tokenRefused).toBe(true);
+	});
+
+	it("does not call any other failure a refused token", async () => {
+		apiAnswers(500, { type: "internal", detail: "Something broke." });
+
+		const { response, tokenRefused } = await serveRemote(
+			rpc("tools/call", { name: "list_sites", arguments: {} }),
+			TOKEN,
+			() => "unused",
+		);
+
+		expect(tokenRefused).toBe(false);
+		expect(await response.text()).toContain("Something broke.");
+	});
+
+	it("never puts the token in what it answers, even when the API echoes it back", async () => {
+		apiAnswers(400, { type: "bad", detail: `Bad header: Bearer ${TOKEN.token}` });
+
+		const { response } = await serveRemote(
+			rpc("tools/call", { name: "list_sites", arguments: {} }),
+			TOKEN,
+			() => "unused",
+		);
+
+		expect(await response.text()).not.toContain(TOKEN.token);
 	});
 });

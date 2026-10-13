@@ -13,6 +13,7 @@
 
 export {
 	type AccessToken,
+	type ApiFailure,
 	type CommentAudience,
 	type CommentPage,
 	type CommentPlace,
@@ -24,6 +25,7 @@ export {
 	getSite,
 	type Invitation,
 	invitePeople,
+	isTokenRefused,
 	listComments,
 	listFolders,
 	listPeople,

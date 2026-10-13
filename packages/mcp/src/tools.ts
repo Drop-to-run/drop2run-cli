@@ -8,6 +8,7 @@ import {
 	findSite,
 	getSite,
 	invitePeople,
+	isTokenRefused,
 	listComments,
 	listFolders,
 	listPeople,
@@ -512,16 +513,25 @@ export async function withCredentials(
 	const credentials = context.credentials();
 	if (credentials === null) return say(context.missingCredentials(), true);
 
-	return attempt(() => work(credentials));
+	return attempt(
+		() => work(credentials),
+		(error) => {
+			if (isTokenRefused(error)) context.tokenRefused?.();
+		},
+	);
 }
 
 /**
  * Runs a tool, turning a thrown error into something readable rather than a protocol failure.
  *
  * @param work What to do.
+ * @param observe Sees every error before it becomes text, for a surface that has to act on one.
  * @returns The tool result.
  */
-export async function attempt(work: () => Promise<string | ToolResult>): Promise<ToolResult> {
+export async function attempt(
+	work: () => Promise<string | ToolResult>,
+	observe?: (error: unknown) => void,
+): Promise<ToolResult> {
 	try {
 		// A string is the plain case — a tool with nothing structured to say. Anything else is already a
 		// result, built by `report` because the tool declares an `outputSchema`.
@@ -529,6 +539,8 @@ export async function attempt(work: () => Promise<string | ToolResult>): Promise
 
 		return typeof answer === "string" ? say(answer) : answer;
 	} catch (error) {
+		observe?.(error);
+
 		// The message rather than the stack: these are read in a chat, and every one of them is either the
 		// API's own `detail` or a sentence this package wrote.
 		return say(error instanceof Error ? error.message : String(error), true);
@@ -578,6 +590,13 @@ export interface ToolContext {
 	readonly credentials: () => Credentials | null;
 	/** What a tool answers when {@link credentials} returns null: how to sign in on this surface. */
 	readonly missingCredentials: () => string;
+	/**
+	 * Told when the API refused the token during a call — revoked, expired, unknown. The tool still answers
+	 * with the API's sentence; this is for a surface that can do more than that. The remote server answers
+	 * the whole request with HTTP 401, which is what makes a chat client sign in again. Absent locally,
+	 * where the sentence already says to run `login`.
+	 */
+	readonly tokenRefused?: () => void;
 }
 
 /**
@@ -702,15 +721,12 @@ function publishFilesDescription(surface: Surface): string {
  * Built here rather than in `apps/mcp` so the tests in this package exercise exactly what the Worker
  * serves. The Worker builds one per request, around the token of the grant that request carries.
  *
- * @param credentials The credentials for this request's calls, or null when there are none.
- * @param missingCredentials What a tool answers when there are none.
+ * @param surface Where this request's credentials come from, what to say without them, and who to tell
+ * when the API refuses them.
  * @returns The server, ready to connect to a transport.
  */
-export function createRemoteServer(
-	credentials: ToolContext["credentials"],
-	missingCredentials: ToolContext["missingCredentials"],
-): McpServer {
-	const context: ToolContext = { surface: "remote", credentials, missingCredentials };
+export function createRemoteServer(surface: Omit<ToolContext, "surface">): McpServer {
+	const context: ToolContext = { ...surface, surface: "remote" };
 	const server = new McpServer(
 		{ name: "drop2run", version: SERVER_VERSION },
 		{ instructions: instructionsFor("remote") },

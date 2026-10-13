@@ -39,13 +39,47 @@ async function call<T>(credentials: Credentials, path: string, init: RequestInit
 		},
 	});
 
-	if (!response.ok) {
-		const problem = (await response.json().catch(() => null)) as { detail?: string } | null;
-
-		throw new Error(problem?.detail ?? `The API answered ${response.status}.`);
-	}
+	if (!response.ok) throw await failureOf(response);
 
 	return (await response.json()) as T;
+}
+
+/** An error from the API, with the status it answered so a caller can tell a refused token apart. */
+export type ApiFailure = Error & { readonly status: number };
+
+/**
+ * The error a failed response becomes: the API's own `detail` as the message, and its status beside it.
+ *
+ * The status is carried because one failure means something different from all the others: 401 says the
+ * token is no longer good, and the remote MCP server has to answer that with HTTP 401 so the chat client
+ * signs in again, rather than with a sentence in the chat nobody can act on.
+ *
+ * @param response The failed response.
+ * @returns The error to throw.
+ */
+async function failureOf(response: Response): Promise<ApiFailure> {
+	const problem = (await response.json().catch(() => null)) as { detail?: string } | null;
+
+	return Object.assign(new Error(problem?.detail ?? `The API answered ${response.status}.`), {
+		status: response.status,
+	});
+}
+
+/**
+ * Whether an error says the API refused the token itself — revoked, expired, or unknown.
+ *
+ * Covers both ways a refusal arrives: a call made here carries the status, and a publish made by the
+ * engine carries the API's problem type, which is `invalid_token` for every rejected token.
+ *
+ * @param error Whatever was thrown.
+ * @returns True when the token was refused.
+ */
+export function isTokenRefused(error: unknown): boolean {
+	if (typeof error !== "object" || error === null) return false;
+
+	const { status, code } = error as { status?: unknown; code?: unknown };
+
+	return status === 401 || code === "invalid_token";
 }
 
 /**
@@ -120,11 +154,7 @@ export async function lookUpSite(
 	);
 
 	if (response.status === 404) return undefined;
-	if (!response.ok) {
-		const problem = (await response.json().catch(() => null)) as { detail?: string } | null;
-
-		throw new Error(problem?.detail ?? `The API answered ${response.status}.`);
-	}
+	if (!response.ok) throw await failureOf(response);
 
 	const detail = (await response.json()) as SiteSummary;
 
@@ -147,11 +177,7 @@ export async function deleteSite(credentials: Credentials, siteId: string): Prom
 		headers: { Authorization: `Bearer ${credentials.token}` },
 	});
 
-	if (!response.ok) {
-		const problem = (await response.json().catch(() => null)) as { detail?: string } | null;
-
-		throw new Error(problem?.detail ?? `The API answered ${response.status}.`);
-	}
+	if (!response.ok) throw await failureOf(response);
 }
 
 /** What promoting an earlier deploy reports back. */
