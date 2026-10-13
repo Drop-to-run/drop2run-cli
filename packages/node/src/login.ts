@@ -74,6 +74,10 @@ export function newAttempt(): Attempt {
  * one I want to revoke". The hostname is truncated to make room rather than the label, so the suffix is
  * never the half that gets cut.
  *
+ * <b>The API reads the suffix.</b> `DeploySources.ForToken` in `apps/api` records a deploy made with a
+ * token whose name ends in `-mcp` as coming from the local MCP server rather than the command line.
+ * Changing the label here changes what that recognises, so change both together.
+ *
  * @param surface Short label for what is signing in, such as `mcp`. Omitted for the command line, where
  * the bare hostname is what earlier tokens already carry.
  * @returns A name at most 64 characters long, never empty.
