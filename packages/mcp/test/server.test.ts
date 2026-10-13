@@ -339,6 +339,17 @@ describe("what each tool admits it does", () => {
 		}
 	});
 
+	it("names every tool in its annotations too, the same as at the top level", async () => {
+		// Claude's connector directory reads `annotations.title` and flags every tool without one; newer
+		// clients read the top-level `title`. Two names for one tool would show a different label per host.
+		const { tools } = await (await connect()).listTools();
+
+		for (const tool of tools) {
+			expect(tool.title, tool.name).toBeTruthy();
+			expect(tool.annotations?.title, tool.name).toBe(tool.title);
+		}
+	});
+
 	it("leaves no tool to the spec's defaults", async () => {
 		// The reason to be explicit at all: an omitted `destructiveHint` defaults to true, so a tool that
 		// says nothing is read as destructive. Silence here is a claim, and it is usually the wrong one.

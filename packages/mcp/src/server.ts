@@ -14,6 +14,7 @@ import {
 	report,
 	SERVER_VERSION,
 	type ToolContext,
+	titled,
 	withCredentials,
 } from "./tools.js";
 
@@ -67,7 +68,7 @@ export function createServer(): McpServer {
 	server.registerTool(
 		"login",
 		{
-			title: "Sign in to Drop2Run",
+			...titled("Sign in to Drop2Run", CREDENTIAL_WRITE),
 			description:
 				"Signs in through a browser on this machine and stores an access token, which every other " +
 				"tool then uses. Opens the browser here and waits for the person to approve. If it answers " +
@@ -89,7 +90,6 @@ export function createServer(): McpServer {
 							"when the stored token is being refused.",
 					),
 			},
-			annotations: CREDENTIAL_WRITE,
 		},
 		({ waitSeconds, replace }) => attempt(() => signInWithBrowser(waitSeconds, replace)),
 	);
@@ -97,7 +97,7 @@ export function createServer(): McpServer {
 	server.registerTool(
 		"login_code",
 		{
-			title: "Sign in with a code",
+			...titled("Sign in with a code", CREDENTIAL_WRITE),
 			description:
 				"Signs in where no browser can be opened on this machine — a container, a remote host. The " +
 				"first call returns a short code and a URL to enter it at, which the person opens " +
@@ -112,7 +112,6 @@ export function createServer(): McpServer {
 					.describe("How long a waiting call polls before answering. Default 120."),
 				replace: z.boolean().optional().describe("Sign in even though a token is already stored."),
 			},
-			annotations: CREDENTIAL_WRITE,
 		},
 		({ waitSeconds, replace }) => attempt(() => signInWithCode(waitSeconds, replace)),
 	);
@@ -122,7 +121,7 @@ export function createServer(): McpServer {
 	server.registerTool(
 		"publish_dir",
 		{
-			title: "Publish a folder",
+			...titled("Publish a folder", REPLACES_A_SITE),
 			description:
 				"Publishes a folder from disk and returns its URL. The folder needs an index.html at its " +
 				"root, or documents (.md, .pdf, .docx, .xlsx, .epub), which are served through the reader.",
@@ -145,7 +144,6 @@ export function createServer(): McpServer {
 				folder: FOLDER_INPUT,
 			},
 			outputSchema: PUBLISH_OUTPUT,
-			annotations: REPLACES_A_SITE,
 		},
 		({ path, site, subdomain, folder }) =>
 			withCredentials(context, async (credentials) => {

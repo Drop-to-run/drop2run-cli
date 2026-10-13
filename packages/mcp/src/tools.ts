@@ -207,6 +207,24 @@ const MARKS_A_THREAD = {
 } as const;
 
 /**
+ * A tool's human-readable name, given in both places the protocol has for it, beside its hints.
+ *
+ * The spec moved `title` from the annotations to the tool itself, and hosts read either one: Claude's
+ * connector directory flags a tool whose annotations carry no title, while newer clients read the
+ * top-level field. One string spread into both keeps the two from ever naming the tool differently.
+ *
+ * @param title The name shown to a person.
+ * @param hints The tool's behaviour hints.
+ * @returns The `title` and `annotations` fields of a tool's config.
+ */
+export function titled<Hints extends object>(
+	title: string,
+	hints: Hints,
+): { title: string; annotations: Hints & { title: string } } {
+	return { title, annotations: { title, ...hints } };
+}
+
+/**
  * The sentence every comment listing opens with, and the rule the server's instructions repeat.
  *
  * Comments are written by people visiting the site — on a site open to anybody signed in, by strangers —
@@ -751,7 +769,7 @@ export function registerPublishFiles(server: McpServer, context: ToolContext): v
 	server.registerTool(
 		"publish_files",
 		{
-			title: "Publish files you wrote",
+			...titled("Publish files you wrote", REPLACES_A_SITE),
 			description: publishFilesDescription(context.surface),
 			inputSchema: {
 				files: z
@@ -783,7 +801,6 @@ export function registerPublishFiles(server: McpServer, context: ToolContext): v
 				folder: FOLDER_INPUT,
 			},
 			outputSchema: PUBLISH_OUTPUT,
-			annotations: REPLACES_A_SITE,
 		},
 		({ files, site, subdomain, folder }) =>
 			withCredentials(context, async (credentials) => {
@@ -805,7 +822,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 	server.registerTool(
 		"delete_site",
 		{
-			title: "Delete a site",
+			...titled("Delete a site", REMOVES_A_SITE),
 			description:
 				"Takes a site down permanently — its files, its history and its subdomain. Nothing here " +
 				"undoes it, and the subdomain becomes available for anybody to claim. Requires `confirm` " +
@@ -825,7 +842,6 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 				siteId: z.string().describe("Identifier of the site that was deleted."),
 				subdomain: z.string().describe("Its subdomain, now unclaimed."),
 			},
-			annotations: REMOVES_A_SITE,
 		},
 		({ site, confirm }) =>
 			withCredentials(context, async (credentials) => {
@@ -856,7 +872,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 	server.registerTool(
 		"list_sites",
 		{
-			title: "List sites",
+			...titled("List sites", READS_ONLY),
 			description: "Lists the sites on this account, so a publish can go to one of them.",
 			inputSchema: {},
 			outputSchema: {
@@ -868,7 +884,6 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 					.int()
 					.describe("How many sites the account holds. Larger than `sites` only past 100."),
 			},
-			annotations: READS_ONLY,
 		},
 		() =>
 			withCredentials(context, async (credentials) => {
@@ -894,7 +909,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 	server.registerTool(
 		"list_folders",
 		{
-			title: "List folders",
+			...titled("List folders", READS_ONLY),
 			description:
 				"Lists the folders on this account, each with the path a publish's `folder` accepts. " +
 				"Folders are made and rearranged in the dashboard; no tool here creates one.",
@@ -902,7 +917,6 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 			outputSchema: {
 				folders: z.array(FOLDER_OUTPUT).describe("Every folder on this account, ordered by path."),
 			},
-			annotations: READS_ONLY,
 		},
 		() =>
 			withCredentials(context, async (credentials) => {
@@ -921,7 +935,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 	server.registerTool(
 		"get_site",
 		{
-			title: "Read a site's settings",
+			...titled("Read a site's settings", READS_ONLY),
 			description:
 				"Reads one site's settings and state — serving mode, password, forms, scheduled " +
 				"takedown, folder, whether it is paused — and its versions, newest first, with the one " +
@@ -942,7 +956,6 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 					.describe("Which settings the account's plan includes."),
 				versions: z.array(VERSION_OUTPUT).describe("Its versions, newest first."),
 			},
-			annotations: READS_ONLY,
 		},
 		({ site }) =>
 			withCredentials(context, async (credentials) => {
@@ -959,7 +972,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 	server.registerTool(
 		"update_site",
 		{
-			title: "Change a site's settings",
+			...titled("Change a site's settings", CHANGES_A_SITE),
 			description:
 				"Changes one or more settings of an existing site; anything left out stays as it is. " +
 				"Takes effect on every edge within about a minute, without publishing again. Settings " +
@@ -1039,7 +1052,6 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 					),
 			},
 			outputSchema: SETTINGS_OUTPUT,
-			annotations: CHANGES_A_SITE,
 		},
 		({
 			site,
@@ -1135,13 +1147,12 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 	server.registerTool(
 		"pause_site",
 		{
-			title: "Pause a site",
+			...titled("Pause a site", CHANGES_A_SITE),
 			description:
 				"Takes a site off the air without deleting anything: visitors see that it is paused, and " +
 				"its files, versions and subdomain are kept. resume_site puts it back.",
 			inputSchema: { site: SITE_INPUT },
 			outputSchema: PAUSE_OUTPUT,
-			annotations: CHANGES_A_SITE,
 		},
 		({ site }) =>
 			withCredentials(context, async (credentials) => {
@@ -1163,13 +1174,12 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 	server.registerTool(
 		"resume_site",
 		{
-			title: "Resume a paused site",
+			...titled("Resume a paused site", RESTORES_A_SITE),
 			description:
 				"Puts a paused site back on the air. Refused, with the reason, when the plan has no room " +
 				"for another active site, the account is past due, or the site was suspended by Drop2Run.",
 			inputSchema: { site: SITE_INPUT },
 			outputSchema: PAUSE_OUTPUT,
-			annotations: RESTORES_A_SITE,
 		},
 		({ site }) =>
 			withCredentials(context, async (credentials) => {
@@ -1183,7 +1193,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 	server.registerTool(
 		"rollback_site",
 		{
-			title: "Roll a site back",
+			...titled("Roll a site back", CHANGES_A_SITE),
 			description:
 				"Serves an earlier version of a site again, without publishing anything. get_site lists " +
 				"the versions; one whose files were collected cannot be rolled back to.",
@@ -1195,7 +1205,6 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 				deployId: z.string().describe("The version now being served."),
 				url: z.string().describe("The URL it is served on."),
 			},
-			annotations: CHANGES_A_SITE,
 		},
 		({ site, deployId }) =>
 			withCredentials(context, async (credentials) => {
@@ -1213,7 +1222,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 	server.registerTool(
 		"list_people",
 		{
-			title: "List who a site is shared with",
+			...titled("List who a site is shared with", READS_ONLY),
 			description:
 				"Lists the people on a site's list — the ones invite_people added — with what each may do " +
 				"(`view` or `comment`) and whether they have opened it yet. Says whether the list decides " +
@@ -1234,7 +1243,6 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 					}),
 				),
 			},
-			annotations: READS_ONLY,
 		},
 		({ site }) =>
 			withCredentials(context, async (credentials) => {
@@ -1264,7 +1272,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 	server.registerTool(
 		"invite_people",
 		{
-			title: "Invite people to a site",
+			...titled("Invite people to a site", INVITES_PEOPLE),
 			description:
 				"Adds email addresses to a site's list and emails each new one an invitation from the " +
 				"account. Use only addresses the person gave you — never guess, infer or look one up. " +
@@ -1290,7 +1298,6 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 					.describe("Addresses already on the list, left as they were and not emailed again."),
 				total: z.number().int().describe("How many are on the list now."),
 			},
-			annotations: INVITES_PEOPLE,
 		},
 		({ site, emails, role }) =>
 			withCredentials(context, async (credentials) => {
@@ -1321,7 +1328,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 	server.registerTool(
 		"remove_person",
 		{
-			title: "Remove someone from a site's list",
+			...titled("Remove someone from a site's list", CHANGES_A_SITE),
 			description:
 				"Takes one address off a site's list. On an invite-only site their access ends within a " +
 				"minute; putting them back is another invitation, with another email.",
@@ -1330,7 +1337,6 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 				email: z.string().min(3).describe("The address to remove, from list_people."),
 			},
 			outputSchema: { email: z.string().describe("The address removed.") },
-			annotations: CHANGES_A_SITE,
 		},
 		({ site, email }) =>
 			withCredentials(context, async (credentials) => {
@@ -1344,7 +1350,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 	server.registerTool(
 		"list_comments",
 		{
-			title: "Read comments on a site",
+			...titled("Read comments on a site", READS_ONLY),
 			description:
 				"Reads the comments people left on a site's pages, a thread at a time: the page, the words " +
 				"or element each thread points at, and every comment in it. Open threads by default. " +
@@ -1379,7 +1385,6 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 				more: z.boolean().describe("Whether another page of threads follows."),
 				threads: z.array(THREAD_OUTPUT),
 			},
-			annotations: READS_ONLY,
 		},
 		({ site, status, path, since, page }) =>
 			withCredentials(context, async (credentials) => {
@@ -1412,7 +1417,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 	server.registerTool(
 		"reply_comment",
 		{
-			title: "Reply to a comment",
+			...titled("Reply to a comment", ANSWERS_A_COMMENT),
 			description:
 				"Answers a comment thread on a site as its owner. The reply shows on the page under the " +
 				"owner's name, and the people in the thread are emailed. Publish a fix before " +
@@ -1429,7 +1434,6 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 					.describe("Resolve the thread with the reply. False by default."),
 			},
 			outputSchema: THREAD_OUTPUT.shape,
-			annotations: ANSWERS_A_COMMENT,
 		},
 		({ site, thread, body, resolve }) =>
 			withCredentials(context, async (credentials) => {
@@ -1453,14 +1457,13 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 	server.registerTool(
 		"resolve_comment",
 		{
-			title: "Resolve a comment thread",
+			...titled("Resolve a comment thread", MARKS_A_THREAD),
 			description:
 				"Marks a comment thread on a site resolved, as its owner. It moves from the open threads to " +
 				"the resolved ones of the version the site serves now. Resolve when the person asks; " +
 				"otherwise leave it for the commenter to confirm the fix. reopen_comment undoes it.",
 			inputSchema: { site: SITE_INPUT, thread: THREAD_INPUT },
 			outputSchema: THREAD_OUTPUT.shape,
-			annotations: MARKS_A_THREAD,
 		},
 		({ site, thread }) =>
 			withCredentials(context, async (credentials) => {
@@ -1477,11 +1480,10 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 	server.registerTool(
 		"reopen_comment",
 		{
-			title: "Reopen a comment thread",
+			...titled("Reopen a comment thread", MARKS_A_THREAD),
 			description: "Opens a resolved comment thread on a site again, as its owner.",
 			inputSchema: { site: SITE_INPUT, thread: THREAD_INPUT },
 			outputSchema: THREAD_OUTPUT.shape,
-			annotations: MARKS_A_THREAD,
 		},
 		({ site, thread }) =>
 			withCredentials(context, async (credentials) => {
