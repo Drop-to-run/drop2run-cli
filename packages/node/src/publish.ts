@@ -86,6 +86,24 @@ export interface NewSite {
 }
 
 /**
+ * The caller's own site under exactly this subdomain, if they have one.
+ *
+ * @param credentials Token and base URL.
+ * @param subdomain The subdomain asked for a new site.
+ * @returns The site, or undefined when none of the caller's sites has that subdomain.
+ */
+async function ownSiteAt(
+	credentials: Credentials,
+	subdomain: string,
+): Promise<SiteSummary | undefined> {
+	const found = await lookUpSite(credentials, subdomain);
+
+	// Subdomain only. `lookUpSite` also reads a site id, and a subdomain shaped like one must not turn
+	// into a different site the caller happens to own.
+	return found?.subdomain.toLowerCase() === subdomain.trim().toLowerCase() ? found : undefined;
+}
+
+/**
  * Finds the site to publish to, creating one when the caller named none.
  *
  * <b>Never guesses.</b> Given no site, it makes a new one rather than reusing the most recent — the
@@ -102,6 +120,13 @@ export interface NewSite {
  * that site", which is a different request with a different effect on the dashboard, and quietly
  * ignoring it would read as having worked. The folder is resolved before the site is created, so a
  * folder that does not exist costs nothing — no site, and no subdomain held by one.
+ *
+ * <b>A subdomain the caller already holds, with nothing live on it, is that site.</b> The site is
+ * created before the deploy, so a deploy the server refuses at prepare — over quota, no index.html — left
+ * an empty site holding the name. Asking again with the same subdomain then answered "already taken", by
+ * the caller's own first try, and a model reading that told the person to pick another name. Publishing
+ * into it loses nothing, since nothing is served there. One that is serving content is refused instead,
+ * naming the way to publish over it: replacing a live site has to be asked for as such.
  *
  * @param credentials Token and base URL.
  * @param site Subdomain or site id the caller named, or undefined.
@@ -134,6 +159,19 @@ async function resolveSite(
 
 	if (site === undefined) {
 		const folderId = folder === undefined ? undefined : await resolveFolder(credentials, folder);
+
+		const held = subdomain === undefined ? undefined : await ownSiteAt(credentials, subdomain);
+		if (held !== undefined) {
+			// Left where it is when a folder was also asked for: the folder describes a site being made,
+			// and this one was made by an earlier try that may have been told a different folder.
+			if (held.liveDeployId === null) return held;
+
+			throw new Error(
+				`You already have a site at ${held.subdomain}, and it is live. To replace what it serves, ` +
+					"publish to it as an existing site (the `site` argument, or `--site` on the command " +
+					"line); to make a new site, choose another subdomain.",
+			);
+		}
 
 		return await createSite(credentials, subdomain, folderId);
 	}

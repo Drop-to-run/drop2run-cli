@@ -17,6 +17,11 @@ export interface SiteSummary {
 	readonly url: string;
 	/** What it is called, or null when it has no name. */
 	readonly name: string | null;
+	/**
+	 * The deploy being served, or null when nothing has gone live yet. Present on sites read from a
+	 * listing; absent on one this package just created or read by id.
+	 */
+	readonly liveDeployId?: string | null;
 }
 
 /**

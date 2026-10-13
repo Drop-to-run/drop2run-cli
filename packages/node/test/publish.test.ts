@@ -327,14 +327,69 @@ describe("publishing to a new site under a name the caller picked", () => {
 		expect(created?.body).toBe('{"subdomain":"my-docs"}');
 	});
 
-	it("does not look at the existing sites first, since the name is for one that does not exist", async () => {
-		const seen = stubApi([]);
+	it("publishes into the caller's own empty site under that name instead of answering taken", async () => {
+		// The site is created before the deploy, so a deploy refused at prepare left an empty site
+		// holding the name, and the retry was told the name was taken — by the first try.
+		const seen = stubApi([
+			{
+				siteId: "01JHELDSITE00000000000000",
+				subdomain: "my-docs",
+				url: "https://my-docs.dropto.live",
+				name: null,
+				liveDeployId: null,
+			},
+		]);
 
-		await publishFiles(credentials, [page], undefined, { subdomain: "my-docs" });
+		const result = await publishFiles(credentials, [page], undefined, { subdomain: "my-docs" });
 
+		expect(result.siteId).toBe("01JHELDSITE00000000000000");
 		expect(
-			seen.some((request) => request.method === "GET" && request.url.endsWith("/api/sites")),
+			seen.some((request) => request.method === "POST" && request.url.endsWith("/api/sites")),
 		).toBe(false);
+		expect(
+			seen.some((request) =>
+				request.url.includes("/sites/01JHELDSITE00000000000000/deploys/prepare"),
+			),
+		).toBe(true);
+	});
+
+	it("refuses rather than replaces when the caller's site under that name is live", async () => {
+		const seen = stubApi([
+			{
+				siteId: "01JLIVESITE00000000000000",
+				subdomain: "my-docs",
+				url: "https://my-docs.dropto.live",
+				name: null,
+				liveDeployId: "01JDEPLOY000000000000001",
+			},
+		]);
+
+		await expect(
+			publishFiles(credentials, [page], undefined, { subdomain: "my-docs" }),
+		).rejects.toThrow(/already have a site at my-docs/);
+
+		expect(seen.some((request) => request.method === "POST")).toBe(false);
+	});
+
+	it("creates the site when only other names match the search", async () => {
+		// The server searches by substring, so `my-docs` also finds `my-docs-old`; only an exact match is
+		// the caller's own site under this name.
+		const seen = stubApi([
+			{
+				siteId: "01JOTHERSITE0000000000000",
+				subdomain: "my-docs-old",
+				url: "https://my-docs-old.dropto.live",
+				name: null,
+				liveDeployId: null,
+			},
+		]);
+
+		const result = await publishFiles(credentials, [page], undefined, { subdomain: "my-docs" });
+
+		expect(result.siteId).toBe("01JNEWSITE0000000000000");
+		expect(
+			seen.some((request) => request.method === "POST" && request.url.endsWith("/api/sites")),
+		).toBe(true);
 	});
 
 	it("is not created when the folder to publish does not exist", async () => {

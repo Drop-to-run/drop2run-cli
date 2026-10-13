@@ -706,6 +706,11 @@ describe("a flag's value", () => {
 				const url = String(input);
 				paths.push(url);
 
+				// The caller holds no site under the name yet, so a new one is created.
+				if (url.includes("/sites?") && (init?.method ?? "GET") === "GET") {
+					return Response.json({ sites: [], total: 0 });
+				}
+
 				if (url.endsWith("/sites") && init?.method === "POST") {
 					return Response.json({
 						siteId: "01JNEW",
