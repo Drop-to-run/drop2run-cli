@@ -59,7 +59,7 @@ import { z } from "zod";
  * release that bumps only the manifest fails before it is published rather than telling every client
  * the wrong version.
  */
-export const SERVER_VERSION = "0.12.0";
+export const SERVER_VERSION = "0.13.0";
 
 /**
  * How the tools below describe their own effects to a client.
