@@ -725,16 +725,32 @@ export function instructionsFor(surface: Surface): string {
  * @returns The description.
  */
 function publishFilesDescription(surface: Surface): string {
-	return surface === "local"
-		? "Publishes one or more files written here — markdown, HTML, CSS, JSON, source code, any " +
+	const body =
+		surface === "local"
+			? "Publishes one or more files written here — markdown, HTML, CSS, JSON, source code, any " +
 				"text — as a site, and returns its URL. A single page goes at index.html; a single .md, " +
 				".markdown or .pdf file is a site on its own, served through the documents viewer. Text " +
 				"only: a PDF or an image has to be published from disk with publish_dir."
-		: "Publishes one or more files written here — markdown, HTML, CSS, JSON, source code, any " +
+			: "Publishes one or more files written here — markdown, HTML, CSS, JSON, source code, any " +
 				"text — as a site, and returns its URL. A single page goes at index.html; a single .md or " +
 				".markdown file is a site on its own, served through the documents viewer. Text only: " +
 				"this connector cannot publish a PDF, an image or an Office file.";
+
+	return `${body} ${RESERVE_FIRST}`;
 }
+
+/**
+ * How to hold an address before its content exists, said on `publish_files` because nothing else can.
+ *
+ * There is no tool that creates an empty site, so "create the site abc first, I'll send the content
+ * later" had no answer here, and the only way to an empty site was around the connector: the HTTP API,
+ * called by a script of one's own. That is the shape behind the deploys of real files declared as 0 bytes
+ * each that failed in production on 13/10/2026, made with a hand-made token.
+ */
+const RESERVE_FIRST =
+	"To hold an address before the content exists — the person asks for the site first and the " +
+	"files later — publish a placeholder index.html with `subdomain`, then publish the real files " +
+	"over it with `site`. There is no way to create an empty site.";
 
 /**
  * Builds the server a hosted chat reaches by URL: every shared tool, none of the local three.
