@@ -71,10 +71,13 @@ export async function serveRemote(
  * Here it reaches a hosted chat's transcript — stored by somebody else, shared, quoted back — and the token
  * is one the Worker holds on the person's behalf, which they never saw. So nothing leaves with it in.
  *
+ * The same goes for every header value the credentials carry — the Worker's service key, which is a secret
+ * of the deployment rather than of any one person, and worth as much to keep out of a transcript.
+ *
  * JSON responses only, which is all this server sends (`enableJsonResponse`); anything else passes as it is.
  *
  * @param response The transport's response.
- * @param credentials The token this request spoke with.
+ * @param credentials The token this request spoke with, and its extra headers.
  * @returns The response, scrubbed.
  */
 async function withoutToken(
@@ -85,14 +88,12 @@ async function withoutToken(
 		return response;
 	}
 
-	const body = await response.text();
+	const secrets = [credentials.token, ...Object.values(credentials.headers ?? {})].filter(
+		(secret) => secret.length > 0,
+	);
+	let body = await response.text();
 
-	if (!body.includes(credentials.token)) {
-		return new Response(body, { status: response.status, headers: response.headers });
-	}
+	for (const secret of secrets) body = body.replaceAll(secret, "[secret]");
 
-	return new Response(body.replaceAll(credentials.token, "[token]"), {
-		status: response.status,
-		headers: response.headers,
-	});
+	return new Response(body, { status: response.status, headers: response.headers });
 }

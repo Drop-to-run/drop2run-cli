@@ -224,6 +224,7 @@ export async function publish(
 	await deploy(watched, target.siteId, record, undefined, {
 		baseUrl: credentials.apiBaseUrl,
 		token: credentials.token,
+		...(credentials.headers === undefined ? {} : { headers: credentials.headers }),
 	}).catch((error: unknown) => {
 		// The engine both reports and throws. Preferring the reported message keeps the wording the same
 		// as a browser would show for the same failure, and the detail rides along so a terminal can say

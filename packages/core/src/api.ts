@@ -137,6 +137,13 @@ export interface ApiOptions {
 	 * describing a team would publish to the caller's personal account and report success.
 	 */
 	readonly accountId?: string;
+	/**
+	 * Extra headers for every call to the control plane, and only those — never an upload, for the reason
+	 * {@link token} gives. The remote MCP Worker sends its service key this way, which the API and the
+	 * zone's firewall read to tell its calls apart from every other Worker's, all of which arrive from the
+	 * same Cloudflare address (docs/briefs/REMOTE-MCP-BRIEF.md §4.3).
+	 */
+	readonly headers?: Readonly<Record<string, string>>;
 	/** Overridable for tests. Defaults to the global `fetch`. */
 	readonly fetch?: typeof fetch;
 	/**
@@ -319,7 +326,8 @@ async function request<T>(
 	const base = options.baseUrl ?? "/api";
 	const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
 
-	const headers: Record<string, string> = {};
+	// The caller's extras first, so none of them can replace the content type or a credential set below.
+	const headers: Record<string, string> = { ...options.headers };
 	if (body !== undefined) headers["Content-Type"] = "application/json";
 	if (options.claimToken) headers[CLAIM_TOKEN_HEADER] = options.claimToken;
 	if (options.token) headers.Authorization = `Bearer ${options.token}`;

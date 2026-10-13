@@ -224,6 +224,27 @@ describe("the remote server over HTTP", () => {
 		expect(await response.text()).toContain("Something broke.");
 	});
 
+	it("sends the service header with every API call, and never answers with its value", async () => {
+		const fetch = vi.fn(
+			async () =>
+				new Response(JSON.stringify({ type: "bad", detail: "Seen header svc-secret-value" }), {
+					status: 400,
+					headers: { "content-type": "application/json" },
+				}),
+		);
+		vi.stubGlobal("fetch", fetch);
+
+		const { response } = await serveRemote(
+			rpc("tools/call", { name: "list_sites", arguments: {} }),
+			{ ...TOKEN, headers: { "X-Drop2Run-Service": "svc-secret-value" } },
+			() => "unused",
+		);
+
+		const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+		expect(new Headers(init.headers).get("x-drop2run-service")).toBe("svc-secret-value");
+		expect(await response.text()).not.toContain("svc-secret-value");
+	});
+
 	it("never puts the token in what it answers, even when the API echoes it back", async () => {
 		apiAnswers(400, { type: "bad", detail: `Bad header: Bearer ${TOKEN.token}` });
 

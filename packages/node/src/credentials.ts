@@ -14,6 +14,11 @@ export interface Credentials {
 	readonly token: string;
 	/** Base URL of the API. */
 	readonly apiBaseUrl: string;
+	/**
+	 * Extra headers for every call to the API and nothing else. The remote MCP Worker's service key travels
+	 * here; the local server and the CLI leave it unset.
+	 */
+	readonly headers?: Readonly<Record<string, string>>;
 }
 
 /** The API this server talks to unless told otherwise. */

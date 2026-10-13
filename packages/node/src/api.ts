@@ -33,6 +33,7 @@ async function call<T>(credentials: Credentials, path: string, init: RequestInit
 	const response = await fetch(`${credentials.apiBaseUrl}/${path}`, {
 		...init,
 		headers: {
+			...credentials.headers,
 			...init.headers,
 			Authorization: `Bearer ${credentials.token}`,
 			...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
@@ -150,7 +151,7 @@ export async function lookUpSite(
 
 	const response = await fetch(
 		`${credentials.apiBaseUrl}/sites/${encodeURIComponent(wanted.toUpperCase())}`,
-		{ headers: { Authorization: `Bearer ${credentials.token}` } },
+		{ headers: { ...credentials.headers, Authorization: `Bearer ${credentials.token}` } },
 	);
 
 	if (response.status === 404) return undefined;
@@ -174,7 +175,7 @@ export async function lookUpSite(
 export async function deleteSite(credentials: Credentials, siteId: string): Promise<void> {
 	const response = await fetch(`${credentials.apiBaseUrl}/sites/${encodeURIComponent(siteId)}`, {
 		method: "DELETE",
-		headers: { Authorization: `Bearer ${credentials.token}` },
+		headers: { ...credentials.headers, Authorization: `Bearer ${credentials.token}` },
 	});
 
 	if (!response.ok) throw await failureOf(response);
