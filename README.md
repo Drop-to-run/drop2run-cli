@@ -38,7 +38,9 @@ claude mcp add drop2run -s user -- npx -y @drop2run/mcp
 ```
 
 A chat that cannot run a package — Claude on the web or a phone, ChatGPT — adds the hosted copy of the
-same server by URL instead, `https://mcp.dropto.run/mcp`, and signs in to Drop2Run when it connects. Its
+same server by URL instead, `https://mcp.dropto.run/mcp`, and signs in to Drop2Run when it connects. In
+Claude it is also listed in the
+[connector directory](https://claude.ai/directory/connectors/drop2run). Its
 tools come from `packages/mcp` here (`src/remote.ts`); the sign-in in front of them does not. It
 publishes text files only, and the setup is at [dropto.run/docs/mcp](https://dropto.run/docs/mcp).
 

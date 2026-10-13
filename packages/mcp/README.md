@@ -15,9 +15,11 @@ tools are hosted at a URL:
 https://mcp.dropto.run/mcp
 ```
 
-**Claude** — open
-[this link](https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Drop2Run&connectorUrl=https%3A%2F%2Fmcp.dropto.run%2Fmcp),
-or *Settings → Connectors → Add custom connector* and paste the URL, then sign in to Drop2Run when asked.
+**Claude** — connect it from
+[Claude's connector directory](https://claude.ai/directory/connectors/drop2run) and sign in to Drop2Run
+when asked. To add it by URL instead, open
+[this link](https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Drop2Run&connectorUrl=https%3A%2F%2Fmcp.dropto.run%2Fmcp)
+or *Settings → Connectors → Add custom connector* and paste the URL.
 **Claude Code** — `claude mcp add --transport http drop2run https://mcp.dropto.run/mcp`. **ChatGPT** — add
 it as a custom connector, where your plan offers developer mode.
 
