@@ -68,6 +68,7 @@ describe("the tool surface", () => {
 		const { tools } = await (await connect()).listTools();
 
 		expect(tools.map((tool) => tool.name).sort()).toEqual([
+			"change_subdomain",
 			"delete_site",
 			"get_site",
 			"invite_people",
@@ -456,6 +457,18 @@ describe("the tools that manage an existing site", () => {
 				});
 			}
 
+			if (url.pathname === "/api/sites/01J/subdomain") {
+				const { subdomain } = JSON.parse(String(init?.body)) as { subdomain: string };
+
+				return Response.json({
+					siteId: "01J",
+					subdomain,
+					url: `https://${subdomain}.dropto.live`,
+					subdomainChangesLeft: 1,
+					formerSubdomains: [{ subdomain: "calm-cedar", retiredAt: "2026-10-14T08:00:00Z" }],
+				});
+			}
+
 			// The settings update answers in the API's own spelling of the enum, which is what the
 			// lowercasing in @drop2run/node is there for.
 			return Response.json({
@@ -472,6 +485,48 @@ describe("the tools that manage an existing site", () => {
 			});
 		});
 	}
+
+	it("marks moving a site to a new subdomain destructive, and idempotent", async () => {
+		// Destructive because the address people were given starts redirecting and the change cannot be
+		// had back; idempotent because asking for the name it already has changes nothing.
+		const { tools } = await (await connect()).listTools();
+		const hint = tools.find((tool) => tool.name === "change_subdomain")?.annotations ?? {};
+
+		expect(hint.destructiveHint).toBe(true);
+		expect(hint.idempotentHint).toBe(true);
+	});
+
+	it("will not move a site without its current subdomain repeated back", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+
+		const result = await (await connect()).callTool({
+			name: "change_subdomain",
+			arguments: { site: "calm-cedar", subdomain: "tidy-otter", confirm: "tidy-otter" },
+		});
+
+		expect(result.isError).toBe(true);
+		expect(JSON.stringify(result.content)).toContain("Refusing to move calm-cedar");
+		expect(seen.some((call) => call.startsWith("POST"))).toBe(false);
+	});
+
+	it("moves the site once the current subdomain is repeated back", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+
+		const result = await (await connect()).callTool({
+			name: "change_subdomain",
+			arguments: { site: "calm-cedar", subdomain: "tidy-otter", confirm: "calm-cedar" },
+		});
+
+		expect(result.isError).toBeFalsy();
+		expect(seen).toContain('POST /api/sites/01J/subdomain {"subdomain":"tidy-otter"}');
+		expect(result.structuredContent).toMatchObject({
+			subdomain: "tidy-otter",
+			subdomainChangesLeft: 1,
+			formerSubdomains: ["calm-cedar"],
+		});
+	});
 
 	it("requires the site on every one of them, and nothing else on most", async () => {
 		// `site` required is what stops a model from acting on whichever site it last heard about.

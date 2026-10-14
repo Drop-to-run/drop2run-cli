@@ -28,6 +28,8 @@ const SITE: SiteDetail = {
 	comments: "off",
 	commentsAvailable: true,
 	folderId: null,
+	subdomainChangesLeft: 2,
+	formerSubdomains: [],
 	deploys: [
 		{
 			deployId: "01B",

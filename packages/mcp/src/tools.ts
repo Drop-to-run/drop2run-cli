@@ -2,6 +2,7 @@ import {
 	accessOf,
 	type CommentThread,
 	type Credentials,
+	changeSubdomain,
 	deleteSite,
 	describeMode,
 	describeSite,
@@ -147,6 +148,21 @@ const REMOVES_A_SITE = {
  * deletion each change what a URL somebody already has shows. Idempotent because each one sets a state
  * rather than adding to one — the same call twice leaves the site where the first one did.
  */
+/**
+ * Moves a site to a new subdomain.
+ *
+ * Destructive, unlike most settings: the address people were given stops answering with the site and
+ * starts redirecting, and the change cannot be had back — each site gets only a few, a change back to a
+ * former name included. Idempotent, because asking for the name the site already has changes nothing.
+ * Not {@link CHANGES_A_SITE}, whose promise that a later call can put a change back is not true here.
+ */
+const MOVES_AN_ADDRESS = {
+	readOnlyHint: false,
+	destructiveHint: true,
+	idempotentHint: true,
+	openWorldHint: true,
+} as const;
+
 const CHANGES_A_SITE = {
 	readOnlyHint: false,
 	destructiveHint: true,
@@ -441,6 +457,8 @@ function structuredSite(site: SiteDetail): Record<string, unknown> {
 			filesKept: deploy.filesKept,
 			live: deploy.deployId === site.liveDeployId,
 		})),
+		subdomainChangesLeft: site.subdomainChangesLeft,
+		formerSubdomains: [...site.formerSubdomains],
 	};
 }
 
@@ -649,9 +667,10 @@ export function instructionsFor(surface: Surface): string {
 		"",
 		"A new site gets a generated name unless `subdomain` asks for one. Pass it when the person",
 		"named the address they want, and otherwise leave it out — a name is what somebody will be",
-		"given as a URL, it cannot be changed later, and a site created under a guessed one has to",
-		"be deleted by hand. `site` and `subdomain` are opposites: one publishes over a site that",
-		"exists, the other creates one that does not. Never pass both.",
+		"given as a URL, changing it later spends one of the two changes a site gets, and a site",
+		"created under a guessed one has to be renamed or deleted by hand. `site` and `subdomain` are",
+		"opposites: one publishes over a site that exists, the other creates one that does not. Never",
+		"pass both.",
 		"",
 		"A new site goes at the top level of the dashboard unless `folder` files it somewhere. Pass",
 		"it when the person named a folder, as its path (Clients/Acme) or its id; list_folders shows",
@@ -688,9 +707,14 @@ export function instructionsFor(surface: Surface): string {
 		"Publishing over an existing site replaces what it serves, so ask before doing that to a",
 		"site the person did not name.",
 		"",
-		"delete_site is permanent and frees the subdomain for anybody to claim. Ask the person for",
-		"the subdomain and pass what they say as `confirm` — do not fill it in from what you already",
-		"know, because being told it is the point of the step.",
+		"delete_site is permanent, and the subdomain stays reserved: nobody, the person included, can",
+		"use it again. Ask the person for the subdomain and pass what they say as `confirm` — do not",
+		"fill it in from what you already know, because being told it is the point of the step.",
+		"",
+		"change_subdomain moves a site to a new address. The old one keeps redirecting and nobody else",
+		"can take it, but each site gets only a couple of changes, a change back to an old name",
+		"included. Use it only when the person named the new address, and pass the site's current",
+		"subdomain, as they say it, as `confirm`.",
 		"",
 		"An existing site's settings are read with get_site and changed with update_site: its name,",
 		"serving mode (static, spa, docs), a password, whether forms accept submissions, a scheduled",
@@ -814,8 +838,9 @@ export function registerPublishFiles(server: McpServer, context: ToolContext): v
 						"Subdomain to create the new site under, when the person asked for a particular " +
 							"address. Only for a new site: leave it out to publish over an existing one, " +
 							"and do not pass it together with `site`. Ask rather than inventing one — the " +
-							"name is the URL somebody will be given, it cannot be changed afterwards, and " +
-							"an unused site made under a guessed name has to be deleted by hand.",
+							"name is the URL somebody will be given, changing it later spends one of the few " +
+							"changes a site gets, and an unused site made under a guessed name has to be " +
+							"deleted by hand.",
 					),
 				folder: FOLDER_INPUT,
 			},
@@ -844,7 +869,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 			...titled("Delete a site", REMOVES_A_SITE),
 			description:
 				"Takes a site down permanently — its files, its history and its subdomain. Nothing here " +
-				"undoes it, and the subdomain becomes available for anybody to claim. Requires `confirm` " +
+				"undoes it, and the subdomain stays reserved — nobody can use it again. Requires `confirm` " +
 				"to repeat the site's own subdomain exactly; ask the person for it rather than filling it " +
 				"in from what you already know, because that is the step this asks for.",
 			inputSchema: {
@@ -881,9 +906,70 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 				await deleteSite(credentials, found.siteId);
 
 				return report(
-					`Deleted ${found.subdomain}. Its files and history are gone, and the subdomain is free ` +
-						"for anybody to claim.",
+					`Deleted ${found.subdomain}. Its files and history are gone; the subdomain stays ` +
+						"reserved and cannot be used again.",
 					{ siteId: found.siteId, subdomain: found.subdomain },
+				);
+			}),
+	);
+
+	server.registerTool(
+		"change_subdomain",
+		{
+			...titled("Change a site's address", MOVES_AN_ADDRESS),
+			description:
+				"Moves a site to a new subdomain. The old one keeps working by redirecting to the new one, " +
+				"and nobody else can take it. Each site gets only a couple of changes, and a change back to " +
+				"an old name counts too, so use this only when the person named the new address. Requires " +
+				"`confirm` to repeat the site's current subdomain exactly; ask the person rather than " +
+				"filling it in. Visitors who signed in to the site or typed its password are asked again.",
+			inputSchema: {
+				site: SITE_INPUT,
+				subdomain: z.string().min(1).describe("The new subdomain, as the person gave it."),
+				confirm: z
+					.string()
+					.min(1)
+					.describe(
+						"The site's current subdomain, repeated exactly. A mismatch refuses the call rather " +
+							"than guessing which site was meant.",
+					),
+			},
+			outputSchema: {
+				siteId: z.string().describe("Identifier of the site."),
+				subdomain: z.string().describe("The subdomain it answers on now."),
+				url: z.string().describe("Its address now."),
+				subdomainChangesLeft: z
+					.number()
+					.int()
+					.nullable()
+					.describe("How many more changes its plan allows, or null when it allows any number."),
+				formerSubdomains: z
+					.array(z.string())
+					.describe("The subdomains it used to answer on, newest first; each redirects here."),
+			},
+		},
+		({ site, subdomain, confirm }) =>
+			withCredentials(context, async (credentials) => {
+				// Resolved first, for delete_site's reason: `confirm` is compared against the site that would
+				// actually move, not against what was typed as `site`.
+				const found = await findSite(credentials, site);
+
+				if (confirm.trim().toLowerCase() !== found.subdomain.toLowerCase()) {
+					throw new Error(
+						`Refusing to move ${found.subdomain}: \`confirm\` said "${confirm}". ` +
+							"Repeat the current subdomain exactly to go ahead.",
+					);
+				}
+
+				const changed = await changeSubdomain(credentials, found.siteId, subdomain);
+				const left =
+					changed.subdomainChangesLeft === null
+						? ""
+						: ` ${changed.subdomainChangesLeft} address change(s) left.`;
+
+				return report(
+					`${found.subdomain} is now ${changed.url}. The old address redirects there.${left}`,
+					{ ...changed, formerSubdomains: [...changed.formerSubdomains] },
 				);
 			}),
 	);
@@ -974,6 +1060,16 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 					})
 					.describe("Which settings the account's plan includes."),
 				versions: z.array(VERSION_OUTPUT).describe("Its versions, newest first."),
+				subdomainChangesLeft: z
+					.number()
+					.int()
+					.nullable()
+					.describe(
+						"How many more times change_subdomain may move it, or null when there is no limit.",
+					),
+				formerSubdomains: z
+					.array(z.string())
+					.describe("The subdomains it used to answer on, newest first; each redirects to it."),
 			},
 		},
 		({ site }) =>

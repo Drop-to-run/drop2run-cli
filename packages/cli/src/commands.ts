@@ -4,6 +4,7 @@ import {
 	type CommentAudience,
 	type CommentThread,
 	type Credentials,
+	changeSubdomain,
 	clearToken,
 	clientName,
 	configPath,
@@ -798,6 +799,7 @@ const SETTINGS_USAGE = [
 	"  folder <path|id|root>       Which folder it is filed in",
 	"  invite-only on|off          Whether only the people on its list can open it",
 	"  comments off|invited|anyone Who may comment on its pages",
+	"  subdomain <name>            Its address; needs --yes, the old one keeps redirecting",
 ].join("\n");
 
 /** What a reader of a password is, injectable so a test does not need a terminal. */
@@ -814,6 +816,7 @@ type ParsedSetting =
 	| { readonly change: SiteSettingsChange }
 	| { readonly folder: string }
 	| { readonly password: true }
+	| { readonly subdomain: string }
 	| { readonly refusal: string };
 
 /**
@@ -888,6 +891,8 @@ function settingChange(
 		}
 		case "folder":
 			return value ? { folder: value } : needs("Clients/Acme");
+		case "subdomain":
+			return value ? { subdomain: value } : needs("tidy-otter --yes");
 		case "invite-only":
 			if (value === "on" || value === "off") return { change: { invitedOnly: value === "on" } };
 			return { refusal: "`set invite-only` takes `on` or `off`." };
@@ -941,6 +946,16 @@ export async function set(
 		const summary = await findSite(found.credentials, target.named);
 		let change: SiteSettingsChange;
 
+		if ("subdomain" in parsed) {
+			return await moved(
+				found.credentials,
+				summary.siteId,
+				summary.subdomain,
+				parsed.subdomain,
+				options.confirmed,
+			);
+		}
+
 		if ("folder" in parsed) {
 			change = { folderId: await resolveFolderTarget(found.credentials, parsed.folder) };
 		} else if ("password" in parsed) {
@@ -966,6 +981,65 @@ export async function set(
 	} catch (error) {
 		return failure(error instanceof Error ? error.message : String(error));
 	}
+}
+
+/**
+ * Moves a site to a new subdomain, or says what that would cost when `--yes` is missing.
+ *
+ * <b>Needs `--yes`</b>, for a reason of its own rather than `rm`'s: nothing is lost, but every change
+ * spends one of the few the plan allows each site and the old name stays with the site for good, so a
+ * typo costs a change that cannot be had back. Without it the command says what would happen and how
+ * many changes are left, and changes nothing.
+ *
+ * Rewrites the subdomain kept in `drop2run.json` when the file names this site, so the next `deploy`
+ * prints the address it publishes to; the site id there is what finds the site, so nothing breaks if it
+ * does not.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param current Its subdomain now.
+ * @param wanted The subdomain asked for.
+ * @param confirmed Whether `--yes` was given.
+ * @returns The result.
+ */
+async function moved(
+	credentials: Credentials,
+	siteId: string,
+	current: string,
+	wanted: string,
+	confirmed: boolean,
+): Promise<CommandResult> {
+	if (!confirmed) {
+		const site = await getSite(credentials, siteId);
+		const left =
+			site.subdomainChangesLeft === null
+				? "Your plan does not limit how often it changes."
+				: `It spends one of the ${site.subdomainChangesLeft} address change(s) this site has left, ` +
+					"a change back to an old name included.";
+
+		return failure(
+			`This moves ${current} to ${wanted}. ${current} keeps working and redirects there, and nobody ` +
+				`else can take it. ${left}\nAdd --yes if that is what you want.`,
+		);
+	}
+
+	const change = await changeSubdomain(credentials, siteId, wanted);
+
+	const project = readProject();
+	if (project?.siteId === siteId && project.subdomain !== change.subdomain) {
+		writeProject({ ...project, subdomain: change.subdomain });
+	}
+
+	const left =
+		change.subdomainChangesLeft === null
+			? ""
+			: `\n${change.subdomainChangesLeft} address change(s) left.`;
+
+	return {
+		text: `${current} is now ${change.url}\nThe old address redirects there.${left}`,
+		json: change,
+		code: 0,
+	};
 }
 
 /**

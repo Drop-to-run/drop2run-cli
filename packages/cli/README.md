@@ -87,9 +87,9 @@ drop2run init dist --subdomain my-docs    # same, but you choose the address
 ```
 
 Lowercase letters, digits and hyphens, not starting or ending with one. A name that is taken, reserved,
-or past the number of self-picked names your plan allows is refused with the reason. It cannot be changed
-later — a site is reached by the address it was created with — so a wrong name means deleting the site,
-which is not undoable.
+or past the number of self-picked names your plan allows is refused with the reason. It can be changed
+later with `drop2run set subdomain <name> --yes`, but only twice per site, and the old name stays with
+the site as a redirect — so pick it on purpose.
 
 `--site` never creates anything: it finds a site you already have, and fails when nothing matches. That
 is what keeps a subdomain typed one letter wrong from quietly becoming a second site.

@@ -124,6 +124,15 @@ export async function findSite(credentials: Credentials, site: string): Promise<
 const SITE_ID_SHAPE = /^[0-9a-z]{26}$/i;
 
 /**
+ * How many of the search's results are asked whether a name is one of their former subdomains.
+ *
+ * The search matches a former name only whole, so a name that is one comes back with the site that held
+ * it near the top; the rest are substring matches of current names. A few reads bound the cost of a name
+ * that matches nothing.
+ */
+const FORMER_NAME_CANDIDATES = 3;
+
+/**
  * Looks one of the caller's sites up by subdomain or id, or answers undefined.
  *
  * <b>Asked of the server, not searched for in a listing.</b> This used to read `GET /sites` and look
@@ -152,6 +161,19 @@ export async function lookUpSite(
 	const bySubdomain = sites.find((candidate) => candidate.subdomain.toLowerCase() === wanted);
 
 	if (bySubdomain !== undefined) return bySubdomain;
+
+	// A former subdomain: the search matches one whole, and a site that moved still answers to the name a
+	// script or a person remembers. The listing carries only current names, so the few candidates it
+	// returned are asked which names they used to have.
+	for (const candidate of sites.slice(0, FORMER_NAME_CANDIDATES)) {
+		const detail = await call<{ formerSubdomains?: { subdomain: string }[] }>(
+			credentials,
+			`sites/${encodeURIComponent(candidate.siteId)}`,
+		);
+
+		if (detail.formerSubdomains?.some((former) => former.subdomain === wanted)) return candidate;
+	}
+
 	if (!SITE_ID_SHAPE.test(wanted)) return undefined;
 
 	const response = await fetch(
@@ -289,6 +311,13 @@ export interface SiteDetail extends SiteSummary {
 	readonly folderId: string | null;
 	/** Its versions, newest first. */
 	readonly deploys: readonly SiteVersion[];
+	/**
+	 * How many more times its subdomain may change, or null when the plan does not limit it — or when the
+	 * API predates changing it at all.
+	 */
+	readonly subdomainChangesLeft: number | null;
+	/** The subdomains it used to answer on, newest first; each redirects to the current one. */
+	readonly formerSubdomains: readonly string[];
 }
 
 /**
@@ -380,10 +409,15 @@ async function folderFromListing(
 export async function getSite(credentials: Credentials, siteId: string): Promise<SiteDetail> {
 	const [site, invitedOnly] = await Promise.all([
 		call<
-			Omit<SiteDetail, "folderId" | "comments" | "commentsAvailable"> & {
+			Omit<
+				SiteDetail,
+				"folderId" | "comments" | "commentsAvailable" | "subdomainChangesLeft" | "formerSubdomains"
+			> & {
 				folderId?: string | null;
 				commentAudience?: string;
 				feedbackAvailable?: boolean;
+				subdomainChangesLeft?: number | null;
+				formerSubdomains?: { subdomain: string }[];
 			}
 		>(credentials, `sites/${encodeURIComponent(siteId)}`),
 		readInvitedOnly(credentials, siteId),
@@ -426,6 +460,53 @@ export async function getSite(credentials: Credentials, siteId: string): Promise
 			completedAt: deploy.completedAt,
 			filesKept: deploy.filesKept,
 		})),
+		subdomainChangesLeft: site.subdomainChangesLeft ?? null,
+		formerSubdomains: (site.formerSubdomains ?? []).map((former) => former.subdomain),
+	};
+}
+
+/** A site's addresses after its subdomain changed. */
+export interface SubdomainChange {
+	/** ULID of the site. */
+	readonly siteId: string;
+	/** The subdomain it answers on now. */
+	readonly subdomain: string;
+	/** Its URL. */
+	readonly url: string;
+	/** How many more changes its plan allows, or null when it allows any number. */
+	readonly subdomainChangesLeft: number | null;
+	/** The subdomains it used to answer on, newest first; each redirects to the current one. */
+	readonly formerSubdomains: readonly string[];
+}
+
+/**
+ * Moves a site to a new subdomain. The old one keeps redirecting to it and nobody else can take it.
+ *
+ * Spends one of the few changes a plan allows each site — a change back to a former name too — so the CLI
+ * and the MCP tool both ask for it to be confirmed first. Asking for the name the site already has spends
+ * nothing.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param subdomain The new subdomain, as typed; the API normalises it.
+ * @returns The site's addresses after the change.
+ * @throws Error carrying the API's own wording: taken, reserved, malformed, or no changes left.
+ */
+export async function changeSubdomain(
+	credentials: Credentials,
+	siteId: string,
+	subdomain: string,
+): Promise<SubdomainChange> {
+	const changed = await call<
+		Omit<SubdomainChange, "formerSubdomains"> & { formerSubdomains: { subdomain: string }[] }
+	>(credentials, `sites/${encodeURIComponent(siteId)}/subdomain`, {
+		method: "POST",
+		body: JSON.stringify({ subdomain }),
+	});
+
+	return {
+		...changed,
+		formerSubdomains: changed.formerSubdomains.map((former) => former.subdomain),
 	};
 }
 

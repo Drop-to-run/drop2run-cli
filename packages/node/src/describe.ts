@@ -41,6 +41,24 @@ export function accessOf(site: Pick<SiteDetail, "passwordProtected" | "invitedOn
 }
 
 /**
+ * The lines about the site's address beyond the address itself: the names it used to have, and how many
+ * more times it may change. Nothing for a site that has never moved on a plan with no limit.
+ *
+ * @param site The site.
+ * @returns Zero, one or two lines.
+ */
+function addressLines(site: SiteDetail): string[] {
+	return [
+		...(site.formerSubdomains.length > 0
+			? [`  formerly ${site.formerSubdomains.join(", ")} (redirect here)`]
+			: []),
+		...(site.subdomainChangesLeft === null
+			? []
+			: [`  address   ${site.subdomainChangesLeft} change(s) left`]),
+	];
+}
+
+/**
  * Describes a site's settings, state and recent versions as lines of text.
  *
  * A setting the plan does not include says so, because "off" alone reads as something that could be
@@ -73,6 +91,7 @@ export function describeSite(site: SiteDetail, folderPath?: string): string {
 		`  comments  ${site.comments ?? "unknown"}${unavailable(site.commentsAvailable)}`,
 		`  takedown  ${site.expiresAt === null ? "none" : `${site.expiresAt} (${site.expiryAction})`}${unavailable(site.scheduledExpiryAvailable)}`,
 		`  folder    ${site.folderId === null ? "(top level)" : (folderPath ?? site.folderId)}`,
+		...addressLines(site),
 		"",
 		site.deploys.length === 0 ? "No versions yet." : "Versions, newest first:",
 		...versions,

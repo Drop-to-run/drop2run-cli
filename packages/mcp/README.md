@@ -108,6 +108,7 @@ lose it.
 | `list_sites` | Lists the sites on the account |
 | `list_folders` | Lists the account's folders, each with the path `folder` accepts |
 | `delete_site` | Deletes a site permanently, subdomain included — requires the subdomain repeated as `confirm` |
+| `change_subdomain` | Moves a site to a new subdomain; the old one keeps redirecting — requires the current subdomain as `confirm` |
 | `get_site` | Reads a site's settings, whether it is paused, and its versions with the live one marked |
 | `update_site` | Changes a site's name, serving mode, password, invite-only, comments, forms, scheduled takedown or folder |
 | `list_people` | Lists who a site is shared with, what each may do, and whether only they can open it |
@@ -125,8 +126,8 @@ Both publish tools take an optional `site` — a subdomain or site id to publish
 new site is created.
 
 Both also take an optional `subdomain`, which names the new site instead of letting the server generate
-one. It is for a person who asked for a particular address: the name becomes the URL, cannot be changed
-afterwards, and a site made under a guessed one has to be deleted by hand. `site` and `subdomain` are
+one. It is for a person who asked for a particular address: the name becomes the URL, and a site made
+under a guessed one has to be deleted, or moved with `change_subdomain`, by hand. `site` and `subdomain` are
 opposites — one publishes over a site that exists, the other creates one that does not — so passing both
 is refused rather than resolved.
 
@@ -134,6 +135,11 @@ And both take an optional `folder`, which files the new site in one of the accou
 by path such as `Clients/Acme`, or by the id `list_folders` shows. Like `subdomain` it only describes a new
 site, so it cannot be combined with `site`. It never creates a folder: one that does not exist is refused
 with the list of those that do, and nothing is published.
+
+`change_subdomain` moves a site to a new address. The old one keeps working by redirecting to the new
+one, and nobody else can take it. Each site gets two changes, and a change back to an old name counts
+too, so it asks for the current subdomain as `confirm`. Visitors who signed in to the site or typed its
+password are asked again on the new address. `get_site` shows the changes left and the former names.
 
 `update_site` changes only the settings it is given. An empty `name`, `password` or `expiresAt` clears
 that setting, and `folder: "root"` moves the site back to the top level. A takedown pauses the site by

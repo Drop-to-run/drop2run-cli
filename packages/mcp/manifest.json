@@ -58,6 +58,10 @@
 			"description": "Takes a site down permanently, including its subdomain. Requires the subdomain repeated back as confirmation."
 		},
 		{
+			"name": "change_subdomain",
+			"description": "Moves a site to a new subdomain; the old one keeps redirecting. Each site gets a couple of changes. Requires the current subdomain repeated back as confirmation."
+		},
+		{
 			"name": "get_site",
 			"description": "Reads a site's settings, whether it is paused, and its versions."
 		},

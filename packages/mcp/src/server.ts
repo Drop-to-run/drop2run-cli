@@ -138,8 +138,9 @@ export function createServer(): McpServer {
 						"Subdomain to create the new site under, when the person asked for a particular " +
 							"address. Only for a new site: leave it out to publish over an existing one, " +
 							"and do not pass it together with `site`. Ask rather than inventing one — the " +
-							"name is the URL somebody will be given, it cannot be changed afterwards, and " +
-							"an unused site made under a guessed name has to be deleted by hand.",
+							"name is the URL somebody will be given, changing it later spends one of the few " +
+							"changes a site gets, and an unused site made under a guessed name has to be " +
+							"deleted by hand.",
 					),
 				folder: FOLDER_INPUT,
 			},
