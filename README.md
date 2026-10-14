@@ -44,12 +44,20 @@ Claude it is also listed in the
 tools come from `packages/mcp` here (`src/remote.ts`); the sign-in in front of them does not. It
 publishes text files only, and the setup is at [dropto.run/docs/mcp](https://dropto.run/docs/mcp).
 
-It exposes `publish_files`, `publish_dir`, `list_sites`, `list_folders`, `delete_site`, `get_site`,
-`update_site`, `pause_site`, `resume_site` and `rollback_site`, and `login` / `login_code` to get a
-token without leaving the chat. The publishes answer with structured fields
-beside the sentence, so a URL does not have to be read back out of prose; `delete_site` is permanent
-and asks for the site's subdomain repeated back before it runs. The token goes to the same place the
-CLI stores one, so signing in through either covers both.
+It exposes twenty tools, in five groups:
+
+| Group | Tools |
+|---|---|
+| Publish | `publish_files`, `publish_dir` — the second reads a folder on disk, so it is local only |
+| Sites | `list_sites`, `list_folders`, `get_site`, `update_site`, `pause_site`, `resume_site`, `rollback_site`, `change_subdomain`, `delete_site` |
+| Sharing | `list_people`, `invite_people`, `remove_person` |
+| Comments | `list_comments`, `reply_comment`, `resolve_comment`, `reopen_comment` |
+| Sign-in | `login`, `login_code` — local server only; the hosted copy signs in when it connects |
+
+The publishes answer with structured fields beside the sentence, so a URL does not have to be read back
+out of prose. `delete_site` and `change_subdomain` ask for the site's current subdomain repeated back
+before they run; `pause_site` is the reversible way to take a site off the air. The token goes to the
+same place the CLI stores one, so signing in through either covers both.
 
 Each package documents itself in full, including the sign-in flows and what happens without a
 `site`: [`packages/cli/README.md`](packages/cli/README.md) and

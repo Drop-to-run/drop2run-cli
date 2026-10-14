@@ -871,7 +871,8 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 				"Takes a site down permanently — its files, its history and its subdomain. Nothing here " +
 				"undoes it, and the subdomain stays reserved — nobody can use it again. Requires `confirm` " +
 				"to repeat the site's own subdomain exactly; ask the person for it rather than filling it " +
-				"in from what you already know, because that is the step this asks for.",
+				"in from what you already know, because that is the step this asks for. To take a site " +
+				"off the air and keep it, use pause_site instead; resume_site brings it back.",
 			inputSchema: {
 				site: z.string().min(1).describe("Subdomain or site id to delete."),
 				confirm: z
@@ -978,7 +979,10 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 		"list_sites",
 		{
 			...titled("List sites", READS_ONLY),
-			description: "Lists the sites on this account, so a publish can go to one of them.",
+			description:
+				"Lists the sites on this account, newest first, so a publish can go to one of them. " +
+				"Returns up to 100 with the account's total; there are no pages to fetch beyond that. " +
+				"Use get_site for one site's settings and versions.",
 			inputSchema: {},
 			outputSchema: {
 				sites: z

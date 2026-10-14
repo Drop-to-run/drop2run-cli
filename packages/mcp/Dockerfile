@@ -16,7 +16,7 @@
 #
 # Introspection works without a credential on purpose. Every tool refuses without a token, but the
 # token is read per call rather than at boot (see src/tools.ts), so a client — or a directory's
-# checker — can connect and list the three tools without one. A server that exited at startup for a
+# checker — can connect and list every tool without one. A server that exited at startup for a
 # missing token would fail this check while working perfectly for its users.
 #
 # Measured on 2026-09-10, against a filtered export rather than against the monorepo, because the

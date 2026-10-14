@@ -73,7 +73,8 @@ export function createServer(): McpServer {
 				"Signs in through a browser on this machine and stores an access token, which every other " +
 				"tool then uses. Opens the browser here and waits for the person to approve. If it answers " +
 				"that nothing has been approved yet, call it again to keep waiting — that is not a " +
-				"failure. Needs no command line and no token pasted by hand.",
+				"failure. Needs no command line and no token pasted by hand. Where no browser can open on " +
+				"this machine — a container, a remote host — use login_code instead.",
 			inputSchema: {
 				waitSeconds: z
 					.number()
