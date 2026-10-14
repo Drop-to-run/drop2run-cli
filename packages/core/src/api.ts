@@ -1,4 +1,5 @@
 import type { UploadBatch } from "./batch.js";
+import { problemCode } from "./problem.js";
 import { ClientErrorCode, DeployError, describeError, type ManifestFile, sizeOf } from "./types.js";
 import type { UploadTarget } from "./upload.js";
 
@@ -424,7 +425,7 @@ async function problemToError(response: Response): Promise<DeployError> {
 		);
 	}
 
-	const code = typeof problem.type === "string" ? problem.type : `http_${response.status}`;
+	const code = problemCode(problem.type, response.status);
 	const message =
 		typeof problem.detail === "string"
 			? problem.detail

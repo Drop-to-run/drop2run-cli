@@ -74,7 +74,12 @@ export type ProgressEvent =
 	 * A success, not a failure — but a different one from `done`, because nothing changed.
 	 */
 	| { type: "unchanged"; url: string }
-	| { type: "error"; code: string; message: string; detail?: unknown };
+	/**
+	 * Failed. `detail` is the RFC 9457 body when the API refused, and `deployId` the version this run
+	 * created — present only for a failure after the server answered `prepare`, since before that there
+	 * is no version to name.
+	 */
+	| { type: "error"; code: string; message: string; detail?: unknown; deployId?: string };
 
 /** Receives every {@link ProgressEvent} in order. */
 export type ProgressListener = (event: ProgressEvent) => void;

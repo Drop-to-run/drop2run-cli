@@ -60,6 +60,7 @@ export {
 	totalBytes,
 } from "./limits.js";
 export { type DeployOptions, type DeploySource, deploy } from "./pipeline.js";
+export { problemCode, problemTraceId } from "./problem.js";
 export {
 	type ArchiveSummary,
 	type DropSummary,

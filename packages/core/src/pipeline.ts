@@ -67,6 +67,10 @@ export async function deploy(
 	signal?: AbortSignal,
 	options: DeployOptions = {},
 ): Promise<void> {
+	// The version this run created, once the server has said which. Reported with a failure after that
+	// point so a report can name the deploy that broke, not only the site.
+	let deployId: string | undefined;
+
 	try {
 		// Before anything is read, so a caller has a running deploy to show from the first instant.
 		// Reading a 200 MB zip and expanding it took long enough that the drop zone, which had nothing
@@ -119,6 +123,8 @@ export async function deploy(
 			onProgress({ type: "unchanged", url: prepared.url ?? "" });
 			return;
 		}
+
+		deployId = prepared.deployId;
 
 		// Progress is reported against the whole deploy, not against the upload list. A redeploy that
 		// changed three files out of five hundred uploads three, and "3 of 3 files" would read as though
@@ -211,6 +217,7 @@ export async function deploy(
 			code: failure.code,
 			message: failure.message,
 			...(failure.detail === undefined ? {} : { detail: failure.detail }),
+			...(deployId === undefined ? {} : { deployId }),
 		});
 
 		throw failure;
