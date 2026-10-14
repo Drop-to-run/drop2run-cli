@@ -503,6 +503,46 @@ describe("--subdomain", () => {
 		expect(result.code).toBe(1);
 		expect(result.text).toContain("already taken");
 	});
+
+	// The body UseExceptionHandler writes for a crash. What a report needs is its trace id, and the
+	// terminal is where nobody can attach a screenshot, so the link carries it to the report page.
+	it("ends a failure the API logged with a link that reports it", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				Response.json(
+					{
+						type: "https://tools.ietf.org/html/rfc9110#section-15.6.1",
+						title: "An error occurred while processing your request.",
+						status: 500,
+						traceId: "00-c1fcb19d5c751bc149fca3350663284f-3d717d74ded80cf0-00",
+					},
+					{ status: 500 },
+				),
+			),
+		);
+
+		const text = await run(["init", "dist", "--subdomain", "some-name"]);
+		const json = await run(["init", "dist", "--subdomain", "some-name", "--json"]);
+
+		expect(text.code).toBe(1);
+		expect(text.text).toContain(
+			"Report it: https://app.dropto.run/report?code=http_500&trace=00-c1fcb19d5c751bc149fca3350663284f-3d717d74ded80cf0-00&source=cli",
+		);
+		// A script gets the two ids as fields rather than a link to parse.
+		expect(JSON.parse(json.text)).toMatchObject({
+			code: "http_500",
+			traceId: "00-c1fcb19d5c751bc149fca3350663284f-3d717d74ded80cf0-00",
+		});
+	});
+
+	it("prints no report link for a failure that never reached the API", async () => {
+		const result = await run(["init", "dist", "--subdomain", "taken-name"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).not.toContain("Report it");
+	});
 });
 
 describe("--folder", () => {

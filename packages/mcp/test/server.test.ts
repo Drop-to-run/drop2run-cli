@@ -1030,3 +1030,32 @@ describe("the sharing tools", () => {
 		expect(seen).toContain("DELETE /api/sites/01J/viewers?email=client%40example.com");
 	});
 });
+
+describe("a tool whose call the API failed", () => {
+	// What a crash answers with, measured against the API: the framework's RFC address as `type` and the
+	// trace id the log line carries. The chat is where the person is, so the link goes there.
+	it("ends the answer with a link that reports it, filled in with the code and trace id", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				Response.json(
+					{
+						type: "https://tools.ietf.org/html/rfc9110#section-15.6.1",
+						title: "An error occurred while processing your request.",
+						status: 500,
+						traceId: "00-c1fcb19d5c751bc149fca3350663284f-3d717d74ded80cf0-00",
+					},
+					{ status: 500 },
+				),
+			),
+		);
+
+		const result = await (await connect()).callTool({ name: "list_sites", arguments: {} });
+
+		expect(result.isError).toBe(true);
+		expect(JSON.stringify(result.content)).toContain(
+			"Report it: https://app.dropto.run/report?code=http_500&trace=00-c1fcb19d5c751bc149fca3350663284f-3d717d74ded80cf0-00&source=mcp",
+		);
+	});
+});

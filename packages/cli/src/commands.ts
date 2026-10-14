@@ -15,6 +15,7 @@ import {
 	describeMode,
 	describeSite,
 	exchange,
+	failureContext,
 	findSite,
 	getSite,
 	invitePeople,
@@ -38,6 +39,7 @@ import {
 	readProject,
 	removePerson,
 	replyToComment,
+	reportLink,
 	resolveApiBaseUrl,
 	resolveFolder,
 	resolveFolderTarget,
@@ -92,21 +94,37 @@ function failure(text: string): CommandResult {
  * why — no status, no reason — so the one question it provokes is the one it cannot answer. The engine
  * already puts the underlying failure in `DeployError.detail`; this is what gets it to a terminal.
  *
+ * <b>And a link to report it</b>, for a failure the API logged: the report page on the dashboard, with
+ * the code and trace id already in its address, so nobody has to copy them out of a terminal. `--json`
+ * carries the two as fields instead, for a script that files its own reports.
+ *
  * @param error Whatever was caught.
+ * @param apiBaseUrl The API this run talks to, whose dashboard the report link points at. Read from the
+ *   environment and config when not given, which is what every command but a test wants.
  * @returns The failure result, with the cause appended when there is one.
  */
-function failureFrom(error: unknown): CommandResult {
+export function failureFrom(
+	error: unknown,
+	apiBaseUrl: string = resolveApiBaseUrl(),
+): CommandResult {
 	const message = error instanceof Error ? error.message : String(error);
 	const detail = (error as { detail?: unknown } | null)?.detail;
 	const cause = (detail as { cause?: unknown } | null | undefined)?.cause;
+	const context = failureContext(error);
+	const report = reportLink(dashboardUrlFor(apiBaseUrl), context, "cli");
 
 	// Only when it says something the message does not. `String(undefined)` in an error report is worse
 	// than a shorter error report.
 	const extra = cause === undefined || cause === null ? "" : `\n${String(cause)}`;
 
 	return {
-		text: `${message}${extra}`,
-		json: { error: message, ...(detail === undefined ? {} : { detail }) },
+		text: `${message}${extra}${report === null ? "" : `\nReport it: ${report}`}`,
+		json: {
+			error: message,
+			...(context.code === null ? {} : { code: context.code }),
+			...(context.traceId === null ? {} : { traceId: context.traceId }),
+			...(detail === undefined ? {} : { detail }),
+		},
 		code: 1,
 	};
 }
@@ -173,7 +191,7 @@ export async function login(print: (line: string) => void = console.error): Prom
 			code: 0,
 		};
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	} finally {
 		// Always, on every path: a listener left open holds a port and keeps the process alive, which turns
 		// a failed sign-in into a command that never returns.
@@ -210,7 +228,7 @@ export async function loginWithDevice(
 	try {
 		request = await startDevice(apiBaseUrl, name);
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	}
 
 	print(`Open ${request.verificationUri} and enter this code:`);
@@ -398,7 +416,7 @@ export async function folders(): Promise<CommandResult> {
 			code: 0,
 		};
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	}
 }
 
@@ -556,7 +574,7 @@ export async function init(
 			code: 0,
 		};
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	}
 }
 
@@ -602,7 +620,7 @@ export async function remove(site: string | undefined, confirmed: boolean): Prom
 			code: 0,
 		};
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	}
 }
 
@@ -646,7 +664,7 @@ export async function rollback(
 			code: 0,
 		};
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	}
 }
 
@@ -686,7 +704,7 @@ export async function open(
 			code: 0,
 		};
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	}
 }
 
@@ -744,7 +762,7 @@ export async function info(site: string | undefined): Promise<CommandResult> {
 			code: 0,
 		};
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	}
 }
 
@@ -785,7 +803,7 @@ export async function pauseOrResume(
 			code: 0,
 		};
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	}
 }
 
@@ -979,7 +997,7 @@ export async function set(
 
 		return await applied(found.credentials, summary.siteId, summary.subdomain, change);
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	}
 }
 
@@ -1090,7 +1108,7 @@ export async function unset(
 
 		return await applied(found.credentials, summary.siteId, summary.subdomain, change);
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	}
 }
 
@@ -1182,7 +1200,7 @@ export async function tokens(): Promise<CommandResult> {
 
 		return { text, json: { tokens: list }, code: 0 };
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	}
 }
 
@@ -1214,7 +1232,7 @@ export async function people(site: string | undefined): Promise<CommandResult> {
 
 		return { text: [head, ...rows].join("\n"), json: list, code: 0 };
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	}
 }
 
@@ -1276,7 +1294,7 @@ export async function invite(
 			code: 0,
 		};
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	}
 }
 
@@ -1306,7 +1324,7 @@ export async function uninvite(
 
 		return { text: `Removed ${email} from ${summary.subdomain}'s list.`, json: { email }, code: 0 };
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	}
 }
 
@@ -1379,7 +1397,7 @@ export async function comments(
 				code: 0,
 			};
 		} catch (error) {
-			return failure(error instanceof Error ? error.message : String(error));
+			return failureFrom(error);
 		}
 	}
 
@@ -1420,7 +1438,7 @@ export async function comments(
 
 		return { text: `${done}\n${answered.url}`, json: answered, code: 0 };
 	} catch (error) {
-		return failure(error instanceof Error ? error.message : String(error));
+		return failureFrom(error);
 	}
 }
 

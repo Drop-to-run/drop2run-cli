@@ -69,3 +69,4 @@ export {
 	publish,
 	publishFiles,
 } from "./publish.js";
+export { type FailureContext, failureContext, type ReportSource, reportLink } from "./report.js";

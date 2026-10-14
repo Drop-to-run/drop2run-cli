@@ -3,9 +3,11 @@ import {
 	type CommentThread,
 	type Credentials,
 	changeSubdomain,
+	dashboardUrlFor,
 	deleteSite,
 	describeMode,
 	describeSite,
+	failureContext,
 	findSite,
 	getSite,
 	invitePeople,
@@ -19,6 +21,7 @@ import {
 	publishFiles,
 	removePerson,
 	replyToComment,
+	reportLink,
 	resolveFolderTarget,
 	type SiteDetail,
 	type SiteSettingsChange,
@@ -554,19 +557,26 @@ export async function withCredentials(
 		(error) => {
 			if (isTokenRefused(error)) context.tokenRefused?.();
 		},
+		dashboardUrlFor(credentials.apiBaseUrl),
 	);
 }
 
 /**
  * Runs a tool, turning a thrown error into something readable rather than a protocol failure.
  *
+ * A failure the API logged ends with a link to the report page, filled in with its code and trace id,
+ * so the person in the chat can send it on without anyone copying ids out of the conversation.
+ *
  * @param work What to do.
  * @param observe Sees every error before it becomes text, for a surface that has to act on one.
+ * @param dashboardOrigin Where the report page is, when known. Sign-in tools run before there are
+ *   credentials and leave it out; their failures are not the API's anyway.
  * @returns The tool result.
  */
 export async function attempt(
 	work: () => Promise<string | ToolResult>,
 	observe?: (error: unknown) => void,
+	dashboardOrigin?: string,
 ): Promise<ToolResult> {
 	try {
 		// A string is the plain case — a tool with nothing structured to say. Anything else is already a
@@ -579,7 +589,13 @@ export async function attempt(
 
 		// The message rather than the stack: these are read in a chat, and every one of them is either the
 		// API's own `detail` or a sentence this package wrote.
-		return say(error instanceof Error ? error.message : String(error), true);
+		const message = error instanceof Error ? error.message : String(error);
+		const report =
+			dashboardOrigin === undefined
+				? null
+				: reportLink(dashboardOrigin, failureContext(error), "mcp");
+
+		return say(report === null ? message : `${message}\n\nReport it: ${report}`, true);
 	}
 }
 

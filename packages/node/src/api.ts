@@ -1,3 +1,4 @@
+import { problemCode, problemTraceId } from "@drop2run/core";
 import { type Credentials, dashboardUrlFor } from "./credentials.js";
 
 /**
@@ -50,8 +51,17 @@ async function call<T>(credentials: Credentials, path: string, init: RequestInit
 	return (await response.json()) as T;
 }
 
-/** An error from the API, with the status it answered so a caller can tell a refused token apart. */
-export type ApiFailure = Error & { readonly status: number };
+/**
+ * An error from the API, with the status it answered so a caller can tell a refused token apart, and the
+ * code and trace id a report of it needs.
+ */
+export type ApiFailure = Error & {
+	readonly status: number;
+	/** The problem's code, or `http_<status>` when it carried none of ours (`problemCode`). */
+	readonly code: string;
+	/** The id the API logged the request under, or null when the body had none. */
+	readonly traceId: string | null;
+};
 
 /**
  * The error a failed response becomes: the API's own `detail` as the message, and its status beside it.
@@ -60,14 +70,22 @@ export type ApiFailure = Error & { readonly status: number };
  * token is no longer good, and the remote MCP server has to answer that with HTTP 401 so the chat client
  * signs in again, rather than with a sentence in the chat nobody can act on.
  *
+ * `code` and `traceId` are carried for the person who reports it: they are what finds the failure in
+ * the API's log, and this used to drop both.
+ *
  * @param response The failed response.
  * @returns The error to throw.
  */
 async function failureOf(response: Response): Promise<ApiFailure> {
-	const problem = (await response.json().catch(() => null)) as { detail?: string } | null;
+	const problem = (await response.json().catch(() => null)) as {
+		type?: unknown;
+		detail?: string;
+	} | null;
 
 	return Object.assign(new Error(problem?.detail ?? `The API answered ${response.status}.`), {
 		status: response.status,
+		code: problemCode(problem?.type, response.status),
+		traceId: problemTraceId(problem),
 	});
 }
 
