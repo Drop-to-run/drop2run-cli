@@ -338,7 +338,11 @@ export async function startDevice(apiBaseUrl: string, clientName: string): Promi
 /** What one poll of a device sign-in produced. */
 export type DevicePoll =
 	| { readonly state: "pending" }
-	| { readonly state: "slow_down" }
+	| {
+			readonly state: "slow_down";
+			/** Seconds the API asked for in `Retry-After` when a rate limit refused the poll, if it said. */
+			readonly retryAfterSeconds?: number;
+	  }
 	| { readonly state: "granted"; readonly token: ExchangedToken }
 	| { readonly state: "dead"; readonly message: string };
 
@@ -379,6 +383,18 @@ export async function pollDevice(apiBaseUrl: string, deviceCode: string): Promis
 		};
 
 		return { state: "granted", token: { token: body.token, name: body.name, email: body.email } };
+	}
+
+	// A rate limit is not a refusal of the sign-in: the person may still be approving it in the browser.
+	// Read as `slow_down`, waiting at least as long as the API asked, rather than as death — which used to
+	// end a sign-in somebody was about to approve, because polling a little fast from a shared address
+	// tripped the per-address limit.
+	if (response.status === 429) {
+		const retryAfter = Number.parseInt(response.headers.get("Retry-After") ?? "", 10);
+
+		return Number.isFinite(retryAfter) && retryAfter > 0
+			? { state: "slow_down", retryAfterSeconds: retryAfter }
+			: { state: "slow_down" };
 	}
 
 	const problem = (await response.json().catch(() => null)) as {

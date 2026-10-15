@@ -391,7 +391,13 @@ export async function signInWithCode(waitSeconds?: number, replace = false): Pro
 
 		// Backing off on being told to rather than on the next attempt: a client that acknowledged
 		// `slow_down` and then polled at the same rate would be told again forever.
-		if (poll.state === "slow_down") pending.waitMs = Math.min(pending.waitMs * 2, MAX_POLL_MS);
+		// A rate limit says how long; waiting less only earns another refusal.
+		if (poll.state === "slow_down") {
+			pending.waitMs = Math.min(
+				Math.max(pending.waitMs * 2, (poll.retryAfterSeconds ?? 0) * 1000),
+				MAX_POLL_MS,
+			);
+		}
 	}
 
 	return [

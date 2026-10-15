@@ -275,6 +275,32 @@ describe("pollDevice", () => {
 		expect((await pollDevice("https://dropto.run/api", "d2d_x")).state).toBe("slow_down");
 	});
 
+	it("reads a rate limit as slowing down, carrying how long the API asked to wait", async () => {
+		// It used to read as dead: polling a little fast from a shared address ended a sign-in somebody was
+		// about to approve in the browser.
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(
+				async () =>
+					new Response(JSON.stringify({ type: "rate_limited", retryAfter: 42 }), {
+						status: 429,
+						headers: { "Retry-After": "42" },
+					}),
+			),
+		);
+		expect(await pollDevice("https://dropto.run/api", "d2d_x")).toEqual({
+			state: "slow_down",
+			retryAfterSeconds: 42,
+		});
+
+		// A bare 429, from an API older than the header, still slows down rather than giving up.
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => new Response(null, { status: 429 })),
+		);
+		expect(await pollDevice("https://dropto.run/api", "d2d_x")).toEqual({ state: "slow_down" });
+	});
+
 	it("treats a refusal as over rather than as pending", async () => {
 		vi.stubGlobal(
 			"fetch",
