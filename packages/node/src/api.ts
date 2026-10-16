@@ -232,6 +232,11 @@ export interface PromotedDeploy {
 	readonly deployId: string;
 	/** The URL it is live on. */
 	readonly url: string;
+	/**
+	 * `live` when the edge has the version, `pending` when the rollback is committed but Cloudflare has not
+	 * taken it yet. Absent from an API that predates it, which only ever answered once the edge had it.
+	 */
+	readonly edge?: string;
 }
 
 /**

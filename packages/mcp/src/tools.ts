@@ -624,7 +624,8 @@ export function describe(result: PublishResult): string {
 		"",
 		...(mode === null ? [] : [mode, ""]),
 		...(edge === null ? [] : [edge, ""]),
-		`Site ${result.subdomain} (${result.siteId}). Reaching every edge takes up to about a minute.`,
+		// The minute only when the edge has the version: beside the pending line it would contradict it.
+		`Site ${result.subdomain} (${result.siteId}).${edge === null ? " Reaching every edge takes up to about a minute." : ""}`,
 	].join("\n");
 }
 
@@ -1348,10 +1349,12 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 			withCredentials(context, async (credentials) => {
 				const found = await findSite(credentials, site);
 				const promoted = await promoteDeploy(credentials, found.siteId, deployId);
+				// The pending line in place of the minute, not beside it: the two would disagree on how long.
+				const edge = describeEdge({ edgePending: promoted.edge === "pending" });
 
 				return report(
-					`${found.subdomain} is back on ${promoted.deployId}. Reaching every edge takes up to ` +
-						`about a minute.\n${promoted.url}`,
+					`${found.subdomain} is back on ${promoted.deployId}. ` +
+						`${edge ?? "Reaching every edge takes up to about a minute."}\n${promoted.url}`,
 					{ deployId: promoted.deployId, url: promoted.url },
 				);
 			}),

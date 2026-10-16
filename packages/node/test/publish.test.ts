@@ -216,7 +216,7 @@ describe("saying how a published site is served", () => {
 		).toBeNull();
 	});
 
-	it("says a version that has not reached the edge yet is going live, and that publishing again is not needed", () => {
+	it("says a version that has not reached the edge yet is going live, and that doing it again is not needed", () => {
 		const result = {
 			url: "https://x.dropto.live",
 			siteId: "01J",
@@ -229,7 +229,7 @@ describe("saying how a published site is served", () => {
 
 		expect(describeEdge({ ...result, edgePending: false })).toBeNull();
 		expect(describeEdge({ ...result, edgePending: true })).toMatch(
-			/Going live.*no need to publish again/,
+			/Going live.*no need to do it again/,
 		);
 	});
 });

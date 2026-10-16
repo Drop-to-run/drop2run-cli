@@ -662,9 +662,10 @@ export async function rollback(
 	try {
 		const target = await findSite(found.credentials, named);
 		const promoted = await promoteDeploy(found.credentials, target.siteId, deployId);
+		const edge = describeEdge({ edgePending: promoted.edge === "pending" });
 
 		return {
-			text: `${target.subdomain} is back on ${promoted.deployId}.\n${promoted.url}`,
+			text: `${target.subdomain} is back on ${promoted.deployId}.\n${promoted.url}${edge === null ? "" : `\n${edge}`}`,
 			json: promoted,
 			code: 0,
 		};

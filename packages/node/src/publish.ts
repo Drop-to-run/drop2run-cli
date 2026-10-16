@@ -54,18 +54,18 @@ export interface PublishResult {
 /**
  * The line that says a published version has not reached the edge yet, or null when it has.
  *
- * Shared by the CLI and the MCP server. Worded so an agent reading it does not publish again: the
- * version is live, and the site moves to it on its own.
+ * Shared by the CLI and the MCP server, for a publish and for a rollback alike. Worded so an agent
+ * reading it does not do it again: the version is live, and the site moves to it on its own.
  *
- * @param result What the publish returned.
+ * @param result Whether the edge has the version yet, as a publish or a rollback reported it.
  * @returns The line, or null.
  */
-export function describeEdge(result: PublishResult): string | null {
+export function describeEdge(result: Pick<PublishResult, "edgePending">): string | null {
 	if (!result.edgePending) return null;
 
 	return (
-		"Going live: the version is published, but Cloudflare has not taken it yet, so the address may serve " +
-		"the previous version for a few minutes. It switches on its own — there is no need to publish again."
+		"Going live: the version is live, but Cloudflare has not taken it yet, so the address may serve " +
+		"the previous version for a few minutes. It switches on its own — there is no need to do it again."
 	);
 }
 
