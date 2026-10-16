@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Credentials } from "../src/credentials.js";
 import { publishDirectory } from "../src/directory.js";
-import { describeMode, publishFiles } from "../src/publish.js";
+import { describeEdge, describeMode, publishFiles } from "../src/publish.js";
 
 /**
  * Which site a publish goes to, and what the request carries.
@@ -211,8 +211,26 @@ describe("saying how a published site is served", () => {
 				unchanged: true,
 				mode: null,
 				nestedIndex: null,
+				edgePending: false,
 			}),
 		).toBeNull();
+	});
+
+	it("says a version that has not reached the edge yet is going live, and that publishing again is not needed", () => {
+		const result = {
+			url: "https://x.dropto.live",
+			siteId: "01J",
+			subdomain: "x",
+			files: 1,
+			unchanged: false,
+			mode: "static",
+			nestedIndex: null,
+		} as const;
+
+		expect(describeEdge({ ...result, edgePending: false })).toBeNull();
+		expect(describeEdge({ ...result, edgePending: true })).toMatch(
+			/Going live.*no need to publish again/,
+		);
 	});
 });
 

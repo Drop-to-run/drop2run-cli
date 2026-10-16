@@ -61,6 +61,8 @@ export type ProgressEvent =
 	 * Published. `name` is what the site is called now, or null when it has none — the server's answer,
 	 * not the title the drop offered, since a redeploy leaves an existing name alone. `mode` is how the
 	 * site is now served and `modeIsManual` whether its owner chose that, both as the server reports them.
+	 * `edgePending` is true when the version is live but has not reached the edge yet; it gets there on
+	 * its own, usually within minutes, so it is said rather than treated as a failure.
 	 */
 	| {
 			type: "done";
@@ -68,6 +70,7 @@ export type ProgressEvent =
 			name: string | null;
 			mode: ServingMode;
 			modeIsManual: boolean;
+			edgePending: boolean;
 	  }
 	/**
 	 * The dropped folder is byte-for-byte what the site already serves, so no version was published.

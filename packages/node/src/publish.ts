@@ -44,6 +44,29 @@ export interface PublishResult {
 	 * a level down in what was published — the mistake to name, with the folder to publish instead.
 	 */
 	readonly nestedIndex: string | null;
+	/**
+	 * True when the version is live but Cloudflare has not taken it to the edge yet — it refused the write,
+	 * or the account's API budget is spent. It gets there on its own; publishing again is not needed.
+	 */
+	readonly edgePending: boolean;
+}
+
+/**
+ * The line that says a published version has not reached the edge yet, or null when it has.
+ *
+ * Shared by the CLI and the MCP server. Worded so an agent reading it does not publish again: the
+ * version is live, and the site moves to it on its own.
+ *
+ * @param result What the publish returned.
+ * @returns The line, or null.
+ */
+export function describeEdge(result: PublishResult): string | null {
+	if (!result.edgePending) return null;
+
+	return (
+		"Going live: the version is published, but Cloudflare has not taken it yet, so the address may serve " +
+		"the previous version for a few minutes. It switches on its own — there is no need to publish again."
+	);
 }
 
 /**
@@ -216,6 +239,7 @@ export async function publish(
 	let url = target.url;
 	let unchanged = false;
 	let mode: ServingMode | null = null;
+	let edgePending = false;
 	let paths: readonly string[] = [];
 	let failure: string | null = null;
 	let failureCode: string | undefined;
@@ -233,6 +257,7 @@ export async function publish(
 		if (event.type === "done") {
 			url = event.url;
 			mode = event.mode;
+			edgePending = event.edgePending;
 		}
 		if (event.type === "error") {
 			failure = event.message;
@@ -285,6 +310,7 @@ export async function publish(
 		unchanged,
 		mode,
 		nestedIndex: mode === "docs" ? nestedIndexOf(paths) : null,
+		edgePending,
 	};
 }
 

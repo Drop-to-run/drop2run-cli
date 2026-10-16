@@ -104,6 +104,12 @@ export interface CompleteResponse {
 	readonly docsMode: boolean;
 	/** Whether the owner chose the mode by hand, so no deploy changes it. */
 	readonly modeIsManual: boolean;
+	/**
+	 * `live` when the edge has the deploy, `pending` when it is live but Cloudflare has not taken the
+	 * change yet — refused, or its API budget spent. Not a failure: it reaches the edge on its own, and
+	 * calling `complete` again is not needed.
+	 */
+	readonly edge: string;
 }
 
 /** What the pipeline needs to talk to the API. */

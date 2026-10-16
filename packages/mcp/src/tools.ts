@@ -5,6 +5,7 @@ import {
 	changeSubdomain,
 	dashboardUrlFor,
 	deleteSite,
+	describeEdge,
 	describeMode,
 	describeSite,
 	failureContext,
@@ -614,6 +615,7 @@ export function describe(result: PublishResult): string {
 		: `Published ${result.files.toLocaleString()} ${result.files === 1 ? "file" : "files"}.`;
 
 	const mode = describeMode(result);
+	const edge = describeEdge(result);
 
 	return [
 		what,
@@ -621,6 +623,7 @@ export function describe(result: PublishResult): string {
 		result.url,
 		"",
 		...(mode === null ? [] : [mode, ""]),
+		...(edge === null ? [] : [edge, ""]),
 		`Site ${result.subdomain} (${result.siteId}). Reaching every edge takes up to about a minute.`,
 	].join("\n");
 }

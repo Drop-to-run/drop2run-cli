@@ -208,6 +208,7 @@ export async function deploy(
 			name: completed.name,
 			mode: servingModeOf(completed),
 			modeIsManual: completed.modeIsManual,
+			edgePending: completed.edge === "pending",
 		});
 	} catch (error) {
 		const failure = asDeployError(error);

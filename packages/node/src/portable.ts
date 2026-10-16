@@ -63,6 +63,7 @@ export { type Credentials, DEFAULT_API_BASE_URL, dashboardUrlFor } from "./crede
 export { accessOf, describeSite, servingModeOf } from "./describe.js";
 export {
 	type AuthoredFile,
+	describeEdge,
 	describeMode,
 	type NewSite,
 	type PublishResult,

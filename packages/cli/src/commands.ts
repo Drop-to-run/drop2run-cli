@@ -12,6 +12,7 @@ import {
 	createSite,
 	dashboardUrlFor,
 	deleteSite,
+	describeEdge,
 	describeMode,
 	describeSite,
 	exchange,
@@ -497,9 +498,10 @@ export async function deployCommand(
 		// After the URL, so the address stays on its own line where a script reading the second line of
 		// the output has always found it.
 		const mode = describeMode(result);
+		const edge = describeEdge(result);
 
 		return {
-			text: `${what}\n${result.url}${mode === null ? "" : `\n${mode}`}`,
+			text: `${what}\n${result.url}${mode === null ? "" : `\n${mode}`}${edge === null ? "" : `\n${edge}`}`,
 			json: result,
 			code: 0,
 		};

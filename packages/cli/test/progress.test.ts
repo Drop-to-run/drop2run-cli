@@ -58,6 +58,7 @@ group("describe", () => {
 				name: null,
 				mode: "static",
 				modeIsManual: false,
+				edgePending: false,
 			}),
 		).toBeNull();
 		expect(describe({ type: "unchanged", url: "https://x.dropto.live" })).toBeNull();
