@@ -1266,3 +1266,160 @@ export async function removePerson(
 		{ method: "DELETE" },
 	);
 }
+
+/** One header of an upstream as the API shows it: a name and the value's last four characters. */
+export interface UpstreamHeader {
+	/** Header name, lowercase. */
+	readonly name: string;
+	/** The value's last four characters, or empty for a short value. Never the value. */
+	readonly last4: string;
+}
+
+/** One origin a site sends its `/api/*` calls to (docs/briefs/API-PROXY-BRIEF.md). */
+export interface Upstream {
+	/** Upstream id. */
+	readonly id: string;
+	/** `https://host`. */
+	readonly origin: string;
+	/** Methods visitors may send; GET implies HEAD. */
+	readonly methods: readonly string[];
+	/** Header names and the last four characters of each value. */
+	readonly headers: readonly UpstreamHeader[];
+	/** Whether the platform blocked this origin for every site. */
+	readonly blocked: boolean;
+}
+
+/** A site's API connections: its upstreams, the live routes and the account's month. */
+export interface SiteUpstreams {
+	/** The upstreams, oldest first. */
+	readonly upstreams: readonly Upstream[];
+	/** Most upstreams a site may declare. */
+	readonly limit: number;
+	/** Whether the platform switched this site's proxy off. */
+	readonly proxyBlocked: boolean;
+	/** The live version's proxy routes. */
+	readonly routes: readonly { readonly from: string; readonly to: string }[];
+	/** The account's proxied requests this month against the plan. */
+	readonly allowance: {
+		readonly perMonth: number;
+		readonly used: number;
+		readonly suspended: boolean;
+		readonly resetsAt: string;
+	};
+}
+
+/** One header to attach, in plain text: sent once, sealed by the server, never read back. */
+export interface UpstreamHeaderInput {
+	/** Header name, any case. */
+	readonly name: string;
+	/** The value. */
+	readonly value: string;
+}
+
+/**
+ * Reads a site's API connections.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @returns The upstreams, routes and allowance.
+ * @throws Error with the API's wording — `proxy_unavailable` while the proxy is not switched on.
+ */
+export async function listUpstreams(
+	credentials: Credentials,
+	siteId: string,
+): Promise<SiteUpstreams> {
+	return call<SiteUpstreams>(credentials, `sites/${encodeURIComponent(siteId)}/upstreams`);
+}
+
+/**
+ * Writes an origin the same way the API stores it, for matching one this package was given against one the
+ * API returned: lowercase, no trailing slash.
+ *
+ * @param origin As typed.
+ * @returns The comparable form.
+ */
+function originKey(origin: string): string {
+	return origin.trim().toLowerCase().replace(/\/+$/, "");
+}
+
+/**
+ * Declares an upstream, or changes the one the site already has for that origin.
+ *
+ * One verb for both, because the person names an origin and the headers to put on it; whether the site
+ * already had it is the server's state, not theirs. On a change, a header given replaces the one of that
+ * name, and the methods are replaced only when given.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param origin `https://host`.
+ * @param headers Headers to set, values in plain text.
+ * @param methods Methods visitors may send; GET only on a new upstream when left out.
+ * @returns The upstream as it now stands, and whether it was new.
+ */
+export async function setUpstream(
+	credentials: Credentials,
+	siteId: string,
+	origin: string,
+	headers: readonly UpstreamHeaderInput[],
+	methods?: readonly string[],
+): Promise<{ readonly upstream: Upstream; readonly created: boolean }> {
+	const existing = (await listUpstreams(credentials, siteId)).upstreams.find(
+		(upstream) => originKey(upstream.origin) === originKey(origin),
+	);
+	const base = `sites/${encodeURIComponent(siteId)}/upstreams`;
+
+	if (existing === undefined) {
+		const upstream = await call<Upstream>(credentials, base, {
+			method: "POST",
+			body: JSON.stringify({ origin: origin.trim(), headers, ...(methods ? { methods } : {}) }),
+		});
+		return { upstream, created: true };
+	}
+
+	const upstream = await call<Upstream>(credentials, `${base}/${encodeURIComponent(existing.id)}`, {
+		method: "PATCH",
+		body: JSON.stringify({ setHeaders: headers, ...(methods ? { methods } : {}) }),
+	});
+	return { upstream, created: false };
+}
+
+/**
+ * Removes a whole upstream, or only some of its headers.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param origin The upstream's origin.
+ * @param headerNames Headers to drop; when absent or empty the whole upstream goes, keys and all.
+ * @returns The upstream as it now stands, or null when it was removed.
+ * @throws Error when the site declares no upstream for that origin.
+ */
+export async function removeUpstream(
+	credentials: Credentials,
+	siteId: string,
+	origin: string,
+	headerNames?: readonly string[],
+): Promise<Upstream | null> {
+	const existing = (await listUpstreams(credentials, siteId)).upstreams.find(
+		(upstream) => originKey(upstream.origin) === originKey(origin),
+	);
+	if (existing === undefined) throw new Error(`This site declares no upstream for ${origin}.`);
+
+	const path = `sites/${encodeURIComponent(siteId)}/upstreams/${encodeURIComponent(existing.id)}`;
+
+	if (headerNames !== undefined && headerNames.length > 0) {
+		return call<Upstream>(credentials, path, {
+			method: "PATCH",
+			body: JSON.stringify({ removeHeaders: headerNames }),
+		});
+	}
+
+	// Answered with 204 and no body, which `call` would try to parse.
+	const response = await fetch(`${credentials.apiBaseUrl}/${path}`, {
+		method: "DELETE",
+		headers: { ...credentials.headers, Authorization: `Bearer ${credentials.token}` },
+	});
+
+	if (!response.ok) throw await failureOf(response);
+
+	return null;
+}

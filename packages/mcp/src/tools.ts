@@ -21,6 +21,7 @@ import {
 	promoteDeploy,
 	publishFiles,
 	removePerson,
+	removeUpstream,
 	replyToComment,
 	reportLink,
 	resolveFolderTarget,
@@ -29,6 +30,7 @@ import {
 	servingModeOf,
 	setCommentResolved,
 	setSitePaused,
+	setUpstream,
 	updateSiteSettings,
 } from "@drop2run/node/portable";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -349,6 +351,107 @@ function describeThread(thread: CommentThread): string {
 
 /** `site` on every tool that acts on one existing site. */
 const SITE_INPUT = z.string().min(1).describe("Subdomain or site id, from list_sites.");
+
+/**
+ * `upstream` on `update_site`: one origin the site's `/api/*` routes may send calls to, with the headers to
+ * attach (docs/briefs/API-PROXY-BRIEF.md §4.5).
+ *
+ * The description carries the three things an agent gets wrong without being told: a value can never be read
+ * back, a route is a `_redirects` line that has to name the declared origin, and headers the page itself sends
+ * are filtered — so a fixed one the provider needs belongs here, not in the page's code.
+ */
+const UPSTREAM_INPUT = z
+	.object({
+		origin: z
+			.string()
+			.min(1)
+			.describe("`https://` and a host name, nothing after it, such as https://api.openai.com."),
+		headers: z
+			.array(z.object({ name: z.string().min(1), value: z.string().min(1) }))
+			.optional()
+			.describe(
+				"Headers to attach to every call, such as `authorization: Bearer …` or a fixed " +
+					"`anthropic-version`. A value is encrypted on arrival and can never be read back — only " +
+					"its last four characters are shown — so take it from the person, never invent one. A " +
+					"name given again replaces that header.",
+			),
+		methods: z
+			.array(z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]))
+			.optional()
+			.describe(
+				"Methods visitors may send; GET only when a new upstream leaves this out. A method that " +
+					"writes lets anybody who opens the site write with the key — add one only when the " +
+					"person asked, and say so.",
+			),
+		removeHeaders: z
+			.array(z.string().min(1))
+			.optional()
+			.describe("Header names to drop from this upstream."),
+		remove: z
+			.boolean()
+			.optional()
+			.describe("True removes the upstream with all its keys; its routes then answer 502."),
+	})
+	.optional()
+	.describe(
+		"Sends the site's /api/* calls to an API of the person's own without putting a key in the page. A " +
+			"route is a line in the site's _redirects ending in 200, pointing at this origin — " +
+			"`/api/* https://api.example.com/v1/:splat 200` — published like any other file. Headers the " +
+			"page sends are filtered to a short list, so anything the provider always needs goes in " +
+			"`headers` here. Anybody who can open a public site can call these routes: suggest a key " +
+			"with the least access, and a password or invite-only for an internal tool. Plans without " +
+			"the proxy refuse it.",
+	);
+
+/**
+ * Applies an `upstream` change and describes it.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId The site.
+ * @param input What `update_site` was given.
+ * @returns Lines for the tool's text answer.
+ */
+async function applyUpstream(
+	credentials: Credentials,
+	siteId: string,
+	input: NonNullable<z.infer<typeof UPSTREAM_INPUT>>,
+): Promise<string[]> {
+	if (input.remove === true) {
+		await removeUpstream(credentials, siteId, input.origin);
+		return [`  upstream  ${input.origin} removed with its keys; routes to it now answer 502.`];
+	}
+
+	const removing = input.removeHeaders ?? [];
+	if (removing.length > 0) await removeUpstream(credentials, siteId, input.origin, removing);
+
+	// Only dropping headers: nothing to set afterwards. An origin alone is a set — an upstream with no
+	// headers is a public API, and a valid one.
+	if (removing.length > 0 && (input.headers ?? []).length === 0 && input.methods === undefined) {
+		return [`  upstream  ${input.origin}: removed ${removing.join(", ")}.`];
+	}
+
+	const { upstream, created } = await setUpstream(
+		credentials,
+		siteId,
+		input.origin,
+		input.headers ?? [],
+		input.methods,
+	);
+
+	const headers =
+		upstream.headers.length === 0
+			? "no headers"
+			: upstream.headers.map((header) => `${header.name} ••••${header.last4}`).join(", ");
+	return [
+		`  upstream  ${upstream.origin} ${created ? "added" : "updated"} — ${upstream.methods.join(", ")}; ${headers}.`,
+		...(upstream.methods.some((method) => method !== "GET")
+			? ["Anybody who can open the site can now send writes with this key."]
+			: []),
+		...(created
+			? [`Point a route at it in _redirects, such as: /api/* ${upstream.origin}/:splat 200`]
+			: []),
+	];
+}
 
 /** `thread` on the tools that act on one comment thread. */
 const THREAD_INPUT = z.string().min(1).describe("Identifier of the thread, from list_comments.");
@@ -1192,6 +1295,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 						"Required only with `expiryAction: delete`: the site's subdomain, repeated exactly as " +
 							"the person said it. Ask for it rather than filling it in.",
 					),
+				upstream: UPSTREAM_INPUT,
 			},
 			outputSchema: SETTINGS_OUTPUT,
 		},
@@ -1207,9 +1311,45 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 			invitedOnly,
 			comments,
 			confirm,
+			upstream,
 		}) =>
 			withCredentials(context, async (credentials) => {
 				const found = await findSite(credentials, site);
+
+				// The proxy's upstream first and on its own: it is a separate record from the settings, and a
+				// change that only names an upstream must not be refused as "nothing to change".
+				const upstreamLines =
+					upstream === undefined ? [] : await applyUpstream(credentials, found.siteId, upstream);
+				const settingsAsked = [
+					name,
+					mode,
+					password,
+					forms,
+					expiresAt,
+					expiryAction,
+					folder,
+					invitedOnly,
+					comments,
+				].some((value) => value !== undefined);
+
+				if (!settingsAsked) {
+					if (upstream === undefined) throw new Error("Nothing to change — name a setting.");
+
+					const detail = await getSite(credentials, found.siteId);
+					const current = structuredSite(detail);
+					return report([`Updated ${found.subdomain}.`, ...upstreamLines].join("\n"), {
+						siteId: current.siteId,
+						name: current.name,
+						mode: current.mode,
+						passwordProtected: current.passwordProtected,
+						invitedOnly: current.invitedOnly,
+						formsEnabled: current.formsEnabled,
+						comments: current.comments,
+						expiresAt: current.expiresAt,
+						expiryAction: current.expiryAction,
+						folderId: current.folderId,
+					});
+				}
 
 				if (expiryAction !== undefined && expiresAt === undefined) {
 					throw new Error("`expiryAction` only applies with `expiresAt` — send the date too.");
@@ -1269,6 +1409,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 					...(settings.live
 						? ["Reaching every edge takes up to about a minute."]
 						: ["Nothing is published yet, so this applies from the first publish."]),
+					...upstreamLines,
 				];
 
 				return report(lines.join("\n"), {

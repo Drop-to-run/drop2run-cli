@@ -1087,3 +1087,168 @@ describe("a tool whose call the API failed", () => {
 		expect(text).not.toContain("Report it");
 	});
 });
+
+describe("update_site's upstream", () => {
+	/** An upstream as the stub keeps it. */
+	interface StubUpstream {
+		id: string;
+		origin: string;
+		methods: string[];
+		headers: { name: string; last4: string }[];
+		blocked: boolean;
+	}
+
+	/**
+	 * Answers the listing, the site's detail, and the upstream routes as the API does, keeping the
+	 * upstreams the calls create so a second call sees the first.
+	 *
+	 * @param seen Collects each request as `METHOD path body`.
+	 * @returns The fetch stub.
+	 */
+	function stubApi(seen: string[]) {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const upstreams: StubUpstream[] = [];
+
+		return vi.fn(async (input: string | URL, init?: RequestInit) => {
+			const url = new URL(String(input));
+			const method = init?.method ?? "GET";
+			seen.push(`${method} ${url.pathname} ${init?.body ?? ""}`.trim());
+
+			if (url.pathname === "/api/sites") {
+				return Response.json({
+					sites: [
+						{
+							siteId: "01J",
+							subdomain: "calm-cedar",
+							url: "https://calm-cedar.dropto.live",
+							name: null,
+						},
+					],
+				});
+			}
+			if (url.pathname === "/api/sites/01J/upstreams" && method === "GET") {
+				return Response.json({
+					upstreams,
+					limit: 5,
+					proxyBlocked: false,
+					routes: [],
+					allowance: {
+						perMonth: 1000000,
+						used: 0,
+						suspended: false,
+						resetsAt: "2026-11-01T00:00:00Z",
+					},
+				});
+			}
+			if (url.pathname === "/api/sites/01J/upstreams" && method === "POST") {
+				const body = JSON.parse(String(init?.body)) as {
+					origin: string;
+					methods?: string[];
+					headers: { name: string; value: string }[];
+				};
+				const created: StubUpstream = {
+					id: "up1",
+					origin: body.origin.toLowerCase(),
+					methods: body.methods ?? ["GET"],
+					headers: body.headers.map((header) => ({
+						name: header.name,
+						last4: header.value.slice(-4),
+					})),
+					blocked: false,
+				};
+				upstreams.push(created);
+				return Response.json(created);
+			}
+			if (url.pathname === "/api/sites/01J/upstreams/up1" && method === "DELETE") {
+				upstreams.splice(0);
+				return new Response(null, { status: 204 });
+			}
+			if (url.pathname === "/api/sites/01J/viewers") return Response.json({ invitedOnly: false });
+			if (url.pathname === "/api/sites/01J") {
+				return Response.json({
+					siteId: "01J",
+					subdomain: "calm-cedar",
+					url: "https://calm-cedar.dropto.live",
+					name: null,
+					status: "Active",
+					liveDeployId: null,
+					spaMode: false,
+					docsMode: false,
+					modeIsManual: false,
+					passwordProtected: false,
+					passwordProtectionAvailable: true,
+					formsEnabled: false,
+					formsAvailable: true,
+					expiresAt: null,
+					expiryAction: null,
+					scheduledExpiryAvailable: true,
+					commentAudience: "Off",
+					feedbackAvailable: false,
+					folderId: null,
+					deploys: [],
+					subdomainChangesLeft: 2,
+					formerSubdomains: [],
+				});
+			}
+			throw new Error(`Unexpected request to ${method} ${url.pathname}`);
+		});
+	}
+
+	it("adds an upstream on its own, without touching the settings, and never echoes a value", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+
+		const result = await (await connect()).callTool({
+			name: "update_site",
+			arguments: {
+				site: "calm-cedar",
+				upstream: {
+					origin: "https://api.openai.com",
+					headers: [{ name: "authorization", value: "Bearer sk-secret-Wq9z" }],
+				},
+			},
+		});
+
+		expect(result.isError).toBeFalsy();
+		const text = JSON.stringify(result.content);
+		expect(text).toContain("https://api.openai.com added");
+		expect(text).toContain("authorization ••••Wq9z");
+		expect(text).toContain("/api/* https://api.openai.com/:splat 200");
+		expect(text).not.toContain("sk-secret");
+		expect(seen.some((call) => call.startsWith("PATCH /api/sites/01J "))).toBe(false);
+	});
+
+	it("removes an upstream with its keys, matching the origin however it is written", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+		const client = await connect();
+
+		await client.callTool({
+			name: "update_site",
+			arguments: { site: "calm-cedar", upstream: { origin: "https://api.openai.com" } },
+		});
+		const result = await client.callTool({
+			name: "update_site",
+			arguments: {
+				site: "calm-cedar",
+				upstream: { origin: "https://API.openai.com/", remove: true },
+			},
+		});
+
+		expect(result.isError).toBeFalsy();
+		expect(JSON.stringify(result.content)).toContain("removed with its keys");
+		expect(seen).toContain("DELETE /api/sites/01J/upstreams/up1");
+	});
+
+	it("still refuses a call that names nothing to change", async () => {
+		vi.stubGlobal("fetch", stubApi([]));
+
+		const result = await (await connect()).callTool({
+			name: "update_site",
+			arguments: { site: "calm-cedar" },
+		});
+
+		expect(result.isError).toBe(true);
+		expect(JSON.stringify(result.content)).toContain("Nothing to change");
+	});
+});

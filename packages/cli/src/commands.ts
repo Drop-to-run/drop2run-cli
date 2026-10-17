@@ -39,6 +39,7 @@ import {
 	publishDirectory,
 	readProject,
 	removePerson,
+	removeUpstream,
 	replyToComment,
 	reportLink,
 	resolveApiBaseUrl,
@@ -50,8 +51,10 @@ import {
 	servingModeOf,
 	setCommentResolved,
 	setSitePaused,
+	setUpstream,
 	startDevice,
 	TOKEN_VARIABLE,
+	type Upstream,
 	updateSiteSettings,
 	waitForCallback,
 	writeProject,
@@ -824,10 +827,16 @@ const SETTINGS_USAGE = [
 	"  invite-only on|off          Whether only the people on its list can open it",
 	"  comments off|invited|anyone Who may comment on its pages",
 	"  subdomain <name>            Its address; needs --yes, the old one keeps redirecting",
+	"  upstream <origin> [header]  An API its /api/* routes may call; the header's value is",
+	"                              typed at a hidden prompt or piped in; --methods GET,POST",
 ].join("\n");
 
-/** What a reader of a password is, injectable so a test does not need a terminal. */
-export type PasswordReader = () => Promise<string>;
+/**
+ * What a reader of a secret is, injectable so a test does not need a terminal.
+ *
+ * Takes the prompt so one reader serves a site password and an upstream header's value.
+ */
+export type PasswordReader = (prompt?: string) => Promise<string>;
 
 /**
  * What `set` was asked to change, before anything that needs the network or a keyboard.
@@ -841,6 +850,7 @@ type ParsedSetting =
 	| { readonly folder: string }
 	| { readonly password: true }
 	| { readonly subdomain: string }
+	| { readonly upstream: { readonly origin: string; readonly header?: string } }
 	| { readonly refusal: string };
 
 /**
@@ -868,6 +878,19 @@ function settingChange(
 
 	// A second word is refused rather than dropped: `set mode spa other-site` reads like naming a site,
 	// and dropping it would change the site in drop2run.json instead. `password` has its own refusal.
+	if (setting === "upstream") {
+		// The origin and at most one header name — never its value, for the reason `password` refuses one.
+		if (values[0] === undefined) return needs("https://api.example.com authorization");
+		if (values.length > 2) {
+			return {
+				refusal:
+					"`set upstream` takes an origin and one header name; its value is typed at a prompt. " +
+					"Run it once per header. Name the site with `--site <subdomain>`.",
+			};
+		}
+		return { upstream: { origin: values[0], ...(values[1] ? { header: values[1] } : {}) } };
+	}
+
 	if (setting !== "name" && setting !== "password" && values.length > 1) {
 		return {
 			refusal:
@@ -953,12 +976,24 @@ export async function set(
 	site: string | undefined,
 	setting: string | undefined,
 	values: readonly string[],
-	options: { readonly then?: string | undefined; readonly confirmed: boolean },
-	readPassword: PasswordReader = () => readSecret("Password for visitors: "),
+	options: {
+		readonly then?: string | undefined;
+		readonly confirmed: boolean;
+		readonly methods?: string | undefined;
+	},
+	readPassword: PasswordReader = (prompt) => readSecret(prompt ?? "Password for visitors: "),
 ): Promise<CommandResult> {
 	// Read before the token, so a mistyped setting is answered without one.
 	const parsed = settingChange(setting, values, options.then);
 	if ("refusal" in parsed) return failure(parsed.refusal);
+	if (options.methods !== undefined && !("upstream" in parsed)) {
+		return failure("`--methods` only applies to `set upstream`.");
+	}
+
+	const methods = options.methods?.split(",").map((method) => method.trim().toUpperCase());
+	if (methods?.some((method) => !UPSTREAM_METHODS.includes(method))) {
+		return failure("`--methods` takes a comma-separated list of GET, POST, PUT, PATCH and DELETE.");
+	}
 
 	const found = credentialsOr();
 	if ("result" in found) return found.result;
@@ -969,6 +1004,23 @@ export async function set(
 	try {
 		const summary = await findSite(found.credentials, target.named);
 		let change: SiteSettingsChange;
+
+		if ("upstream" in parsed) {
+			const { origin, header } = parsed.upstream;
+			// Asked for only once the site is known to exist, like the password.
+			const value = header === undefined ? undefined : await readPassword(`Value for ${header}: `);
+			if (value === "") return failure(`No value was given for ${header}.`);
+
+			const { upstream, created } = await setUpstream(
+				found.credentials,
+				summary.siteId,
+				origin,
+				header === undefined || value === undefined ? [] : [{ name: header, value }],
+				methods,
+			);
+
+			return upstreamResult(summary.subdomain, upstream, created ? "added" : "updated");
+		}
 
 		if ("subdomain" in parsed) {
 			return await moved(
@@ -1005,6 +1057,39 @@ export async function set(
 	} catch (error) {
 		return failureFrom(error);
 	}
+}
+
+/** Methods an upstream may open, as `--methods` takes them. */
+const UPSTREAM_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+
+/**
+ * What `set upstream` and `unset upstream` print: the origin, its methods and each header by name with its
+ * last four characters — never a value — and the `_redirects` line that sends calls there.
+ *
+ * @param subdomain The site, for the sentence.
+ * @param upstream The upstream as it now stands.
+ * @param verb `added`, `updated` or `changed`.
+ * @returns The result.
+ */
+function upstreamResult(subdomain: string, upstream: Upstream, verb: string): CommandResult {
+	const headers =
+		upstream.headers.length === 0
+			? "(none)"
+			: upstream.headers.map((header) => `${header.name} ••••${header.last4}`).join(", ");
+
+	return {
+		text: [
+			`Upstream ${upstream.origin} ${verb} on ${subdomain}.`,
+			`  methods   ${upstream.methods.join(", ")}`,
+			`  headers   ${headers}`,
+			...(upstream.methods.some((method) => method !== "GET")
+				? ["Anybody who can open the site can send writes with this key."]
+				: []),
+			`Send calls there with a line in _redirects, such as: /api/* ${upstream.origin}/:splat 200`,
+		].join("\n"),
+		json: upstream,
+		code: 0,
+	};
 }
 
 /**
@@ -1078,6 +1163,8 @@ export async function unset(
 	setting: string | undefined,
 	extra: readonly string[] = [],
 ): Promise<CommandResult> {
+	if (setting === "upstream") return await unsetUpstream(site, extra);
+
 	// Refused for the reason `set` refuses a second value: `unset password other-site` would otherwise
 	// make the site in drop2run.json public.
 	if (extra.length > 0) {
@@ -1113,6 +1200,52 @@ export async function unset(
 		const summary = await findSite(found.credentials, target.named);
 
 		return await applied(found.credentials, summary.siteId, summary.subdomain, change);
+	} catch (error) {
+		return failureFrom(error);
+	}
+}
+
+/**
+ * Removes an upstream with every key on it, or one of its headers.
+ *
+ * @param site Subdomain or site id, or undefined to use the project file.
+ * @param values The origin, then optionally one header name.
+ * @returns The result.
+ */
+async function unsetUpstream(
+	site: string | undefined,
+	values: readonly string[],
+): Promise<CommandResult> {
+	const [origin, header, ...extra] = values;
+	if (origin === undefined || extra.length > 0) {
+		return failure(
+			"`unset upstream` takes an origin, and optionally one header name to drop only that header: " +
+				"`drop2run unset upstream https://api.example.com [authorization]`.",
+		);
+	}
+
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	const target = siteOr(site, `drop2run unset upstream ${origin} --site <subdomain>`);
+	if ("result" in target) return target.result;
+
+	try {
+		const summary = await findSite(found.credentials, target.named);
+		const left = await removeUpstream(
+			found.credentials,
+			summary.siteId,
+			origin,
+			header === undefined ? undefined : [header],
+		);
+
+		if (left !== null) return upstreamResult(summary.subdomain, left, "changed");
+
+		return {
+			text: `Removed ${origin} from ${summary.subdomain}, with its keys. Routes to it now answer 502.`,
+			json: { removed: origin },
+			code: 0,
+		};
 	} catch (error) {
 		return failureFrom(error);
 	}

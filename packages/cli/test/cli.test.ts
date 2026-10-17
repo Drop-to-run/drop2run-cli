@@ -1507,3 +1507,156 @@ describe("sharing for review", () => {
 		expect(seen).toContain("DELETE /api/sites/01J/viewers?email=dana%40example.com");
 	});
 });
+
+describe("set upstream and unset upstream", () => {
+	/**
+	 * Answers the listing and the upstream routes, keeping what the calls create.
+	 *
+	 * @param seen Collects each request as `METHOD path body`.
+	 * @returns The fetch stub.
+	 */
+	function upstreamApi(seen: string[]) {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const kept: {
+			id: string;
+			origin: string;
+			methods: string[];
+			headers: { name: string; last4: string }[];
+		}[] = [];
+
+		return vi.fn(async (input: string | URL, init?: RequestInit) => {
+			const url = new URL(String(input));
+			const method = init?.method ?? "GET";
+			seen.push(`${method} ${url.pathname} ${init?.body ?? ""}`.trim());
+
+			if (url.pathname === "/api/sites") {
+				return Response.json({
+					sites: [
+						{
+							siteId: "01J",
+							subdomain: "calm-cedar",
+							url: "https://calm-cedar.dropto.live",
+							name: null,
+						},
+					],
+				});
+			}
+			if (url.pathname === "/api/sites/01J/upstreams" && method === "GET") {
+				return Response.json({
+					upstreams: kept,
+					limit: 5,
+					proxyBlocked: false,
+					routes: [],
+					allowance: {},
+				});
+			}
+			if (url.pathname === "/api/sites/01J/upstreams" && method === "POST") {
+				const body = JSON.parse(String(init?.body)) as {
+					origin: string;
+					methods?: string[];
+					headers: { name: string; value: string }[];
+				};
+				const made = {
+					id: "up1",
+					origin: body.origin,
+					methods: body.methods ?? ["GET"],
+					headers: body.headers.map((header) => ({
+						name: header.name,
+						last4: header.value.slice(-4),
+					})),
+					blocked: false,
+				};
+				kept.push(made);
+				return Response.json(made);
+			}
+			if (url.pathname === "/api/sites/01J/upstreams/up1" && method === "DELETE") {
+				return new Response(null, { status: 204 });
+			}
+			throw new Error(`Unexpected request to ${method} ${url.pathname}`);
+		});
+	}
+
+	it("takes a header's name as an argument and its value only at the prompt, and never prints it", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", upstreamApi(seen));
+		const prompts: string[] = [];
+
+		const result = await set(
+			"calm-cedar",
+			"upstream",
+			["https://api.openai.com", "authorization"],
+			{ confirmed: false, methods: "get,post" },
+			async (prompt) => {
+				prompts.push(prompt ?? "");
+				return "Bearer sk-secret-Wq9z";
+			},
+		);
+
+		expect(result.code).toBe(0);
+		expect(prompts).toEqual(["Value for authorization: "]);
+		expect(seen).toContain(
+			'POST /api/sites/01J/upstreams {"origin":"https://api.openai.com","headers":[{"name":"authorization","value":"Bearer sk-secret-Wq9z"}],"methods":["GET","POST"]}',
+		);
+		expect(result.text).toContain("authorization ••••Wq9z");
+		expect(result.text).toContain("send writes with this key");
+		expect(result.text).not.toContain("sk-secret");
+	});
+
+	it("refuses a second header name, and methods it does not know, before asking for anything", async () => {
+		const fetched = vi.fn(async () => Response.json({}));
+		vi.stubGlobal("fetch", fetched);
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+
+		const twoHeaders = await run([
+			"set",
+			"upstream",
+			"https://api.example.com",
+			"a",
+			"b",
+			"--site",
+			"calm-cedar",
+		]);
+		const badMethod = await run([
+			"set",
+			"upstream",
+			"https://api.example.com",
+			"--methods",
+			"GET,OPTIONS",
+			"--site",
+			"calm-cedar",
+		]);
+		const methodsElsewhere = await run([
+			"set",
+			"forms",
+			"on",
+			"--methods",
+			"GET",
+			"--site",
+			"calm-cedar",
+		]);
+
+		expect(twoHeaders.code).toBe(1);
+		expect(twoHeaders.text).toContain("once per header");
+		expect(badMethod.code).toBe(1);
+		expect(methodsElsewhere.code).toBe(1);
+		expect(fetched).not.toHaveBeenCalled();
+	});
+
+	it("removes an upstream with its keys", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", upstreamApi(seen));
+
+		await set("calm-cedar", "upstream", ["https://api.openai.com"], { confirmed: false });
+		const result = await run([
+			"unset",
+			"upstream",
+			"https://api.openai.com",
+			"--site",
+			"calm-cedar",
+		]);
+
+		expect(result.code).toBe(0);
+		expect(result.text).toContain("with its keys");
+		expect(seen).toContain("DELETE /api/sites/01J/upstreams/up1");
+	});
+});

@@ -54,6 +54,7 @@ const HELP = `drop2run — publish a static site from the command line
   drop2run info [site]                         Show a site's settings and versions
   drop2run set <setting> <value> [--site X]    Change one setting (see Settings below)
   drop2run unset name|password|expires         Clear a name, a password or a takedown
+  drop2run unset upstream <origin> [header]    Remove an upstream and its keys, or one header
   drop2run pause [site]                        Take a site off the air, keeping its files
   drop2run resume [site]                       Put a paused site back on the air
   drop2run rollback <deployId> [--site X]      Put an earlier version back live
@@ -83,6 +84,8 @@ Flags
   --path X       Only the comments on one page, such as /pricing
   --resolve      Resolve the thread with the reply (\`comments reply\` only)
   --role X       What invited people may do: view (the default) or comment
+  --methods X    What visitors may send to an upstream, such as GET,POST;
+                 GET only when a new one leaves it out (\`set upstream\` only)
 
 Comments
   \`comments reply\`, \`resolve\` and \`reopen\` act on --site, else the site in
@@ -106,6 +109,12 @@ Settings
   set comments off|invited|anyone
                                 Who may comment: nobody, people invited to
                                 comment, or anybody signed in
+  set upstream <origin> [header]
+                                Let /api/* routes call an API of yours; the
+                                header's value is typed at a hidden prompt or
+                                piped in, encrypted, and never shown again.
+                                Point a _redirects line at it:
+                                /api/* https://api.example.com/:splat 200
 
   \`set\` and \`unset\` act on --site, else the site in drop2run.json. A
   setting your plan does not include is refused with the reason, and
@@ -156,7 +165,16 @@ function flagValue(args: readonly string[], flag: string): string | undefined {
  * Kept as one list because the parser has two questions about a flag — what its value is, and whether
  * the next word belongs to it — and answering them from two lists is how they disagree.
  */
-const VALUE_FLAGS = ["--site", "--subdomain", "--folder", "--then", "--status", "--path", "--role"];
+const VALUE_FLAGS = [
+	"--site",
+	"--subdomain",
+	"--folder",
+	"--then",
+	"--status",
+	"--path",
+	"--role",
+	"--methods",
+];
 
 /**
  * Pulls out the positional arguments, leaving flags and the values that belong to them behind.
@@ -344,6 +362,7 @@ export async function run(commandLine: readonly string[]): Promise<CommandResult
 			resolve: argv.includes("--resolve"),
 		},
 		flagValue(argv, "--role"),
+		flagValue(argv, "--methods"),
 	);
 
 	return json ? { ...result, text: JSON.stringify(result.json, null, 2) } : result;
@@ -363,6 +382,8 @@ export async function run(commandLine: readonly string[]): Promise<CommandResult
  * @param newSite Values of `--subdomain` and `--folder`, already checked against the command and `--site`.
  * @param then Value of `--then`, which only `set expires` reads.
  * @param commentOptions `--status`, `--path` and `--resolve`, which only `comments` reads.
+ * @param role Value of `--role`, which only `invite` reads.
+ * @param methods Value of `--methods`, which only `set upstream` reads.
  * @returns The command's result.
  */
 async function dispatch(
@@ -376,6 +397,7 @@ async function dispatch(
 	then: string | undefined = undefined,
 	commentOptions: CommentOptions = {},
 	role: string | undefined = undefined,
+	methods: string | undefined = undefined,
 ): Promise<CommandResult> {
 	switch (command) {
 		case "login": {
@@ -419,7 +441,11 @@ async function dispatch(
 		case "set":
 			// The site comes from `--site` only: the positions after `set` are the setting and its value,
 			// and a name may be several words.
-			return await set(site, rest[0], rest.slice(1), { then, confirmed });
+			return await set(site, rest[0], rest.slice(1), {
+				then,
+				confirmed,
+				methods,
+			});
 		case "unset":
 			return await unset(site, rest[0], rest.slice(1));
 		case "pause":
