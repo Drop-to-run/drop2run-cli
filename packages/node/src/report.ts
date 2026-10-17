@@ -47,10 +47,21 @@ export function failureContext(error: unknown): FailureContext {
 }
 
 /**
+ * API codes that answer the question correctly rather than report a fault, so no report link goes under
+ * them.
+ *
+ * `owner_only` is a member being told, correctly, that an owner has to do this. The API logs it with a
+ * trace id like every response, so before this a member who ran `delete_site` got the right answer and
+ * then a link inviting them to report it as our bug.
+ */
+const ANSWERS_NOT_FAULTS: ReadonlySet<string> = new Set(["owner_only"]);
+
+/**
  * The address of the report page, filled in for one failure.
  *
  * Only for a failure the API logged. A refusal made here — a missing `index.html`, a folder over the
- * plan's size — is the person's to fix, and a report link under it reads as "this is our fault".
+ * plan's size — is the person's to fix, and a report link under it reads as "this is our fault". The
+ * same goes for an API refusal that is the right answer ({@link ANSWERS_NOT_FAULTS}).
  *
  * @param dashboardOrigin The dashboard's origin (`dashboardUrlFor`), where the report page is.
  * @param context What the failure carries.
@@ -63,6 +74,7 @@ export function reportLink(
 	source: ReportSource,
 ): string | null {
 	if (context.traceId === null) return null;
+	if (context.code !== null && ANSWERS_NOT_FAULTS.has(context.code)) return null;
 
 	const url = new URL("/report", dashboardOrigin);
 	if (context.code !== null) url.searchParams.set("code", context.code);

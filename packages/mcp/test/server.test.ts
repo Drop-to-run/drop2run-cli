@@ -1058,4 +1058,32 @@ describe("a tool whose call the API failed", () => {
 			"Report it: https://app.dropto.run/report?code=http_500&trace=00-c1fcb19d5c751bc149fca3350663284f-3d717d74ded80cf0-00&source=mcp",
 		);
 	});
+
+	// A member told an owner has to do this got the right answer, and then a link inviting them to report
+	// it as a bug — the API puts a trace id on every response, refusals included.
+	it("passes on an owner-only refusal without a report link", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				Response.json(
+					{
+						type: "owner_only",
+						title: "Owner only",
+						status: 403,
+						detail: "Only an owner of this account can delete a site. Ask one of them to do it.",
+						traceId: "00-c1fcb19d5c751bc149fca3350663284f-3d717d74ded80cf0-00",
+					},
+					{ status: 403 },
+				),
+			),
+		);
+
+		const result = await (await connect()).callTool({ name: "list_sites", arguments: {} });
+		const text = JSON.stringify(result.content);
+
+		expect(result.isError).toBe(true);
+		expect(text).toContain("Only an owner of this account can delete a site");
+		expect(text).not.toContain("Report it");
+	});
 });

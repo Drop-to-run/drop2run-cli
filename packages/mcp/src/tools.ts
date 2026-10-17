@@ -892,7 +892,9 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 				"undoes it, and the subdomain stays reserved — nobody can use it again. Requires `confirm` " +
 				"to repeat the site's own subdomain exactly; ask the person for it rather than filling it " +
 				"in from what you already know, because that is the step this asks for. To take a site " +
-				"off the air and keep it, use pause_site instead; resume_site brings it back.",
+				"off the air and keep it, use pause_site instead; resume_site brings it back. Only an owner " +
+				"of the account can delete a site; on a team where the person is a member, say an owner " +
+				"has to do it rather than asking them for the subdomain.",
 			inputSchema: {
 				site: z.string().min(1).describe("Subdomain or site id to delete."),
 				confirm: z
@@ -943,7 +945,8 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 				"and nobody else can take it. Each site gets only a couple of changes, and a change back to " +
 				"an old name counts too, so use this only when the person named the new address. Requires " +
 				"`confirm` to repeat the site's current subdomain exactly; ask the person rather than " +
-				"filling it in. Visitors who signed in to the site or typed its password are asked again.",
+				"filling it in. Visitors who signed in to the site or typed its password are asked again. " +
+				"Only an owner of the account can change an address.",
 			inputSchema: {
 				site: SITE_INPUT,
 				subdomain: z.string().min(1).describe("The new subdomain, as the person gave it."),
