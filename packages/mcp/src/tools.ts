@@ -456,6 +456,10 @@ async function applyUpstream(
 		...(upstream.methods.some((method) => method !== "GET")
 			? ["Anybody who can open the site can now send writes with this key."]
 			: []),
+		// Said rather than dropped: the agent asked for a removal, and a new upstream had nothing to remove.
+		...(created && removing.length > 0
+			? [`It was new, so removeHeaders (${removing.join(", ")}) had nothing to remove.`]
+			: []),
 		...(created
 			? [`Point a route at it in _redirects, such as: /api/* ${upstream.origin}/:splat 200`]
 			: []),
