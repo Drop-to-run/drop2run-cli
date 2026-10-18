@@ -110,7 +110,7 @@ lose it.
 | `delete_site` | Deletes a site permanently, subdomain included — requires the subdomain repeated as `confirm` |
 | `change_subdomain` | Moves a site to a new subdomain; the old one keeps redirecting — requires the current subdomain as `confirm` |
 | `get_site` | Reads a site's settings, whether it is paused, and its versions with the live one marked |
-| `update_site` | Changes a site's name, serving mode, password, invite-only, comments, forms, scheduled takedown or folder |
+| `update_site` | Changes a site's name, serving mode, password, invite-only, comments, forms, scheduled takedown or folder, and the APIs its `/api/*` routes may call |
 | `list_people` | Lists who a site is shared with, what each may do, and whether only they can open it |
 | `invite_people` | Invites addresses the person gave — to view, or to view and comment — and emails each one |
 | `remove_person` | Takes one address off a site's list |
@@ -146,6 +146,12 @@ that setting, and `folder: "root"` moves the site back to the top level. A taked
 default; `expiryAction: "delete"` removes it instead, and asks for the subdomain as `confirm` the way
 `delete_site` does. Settings your plan does not include are refused with the reason, and `get_site` says
 which ones those are.
+
+On paid plans, `update_site`'s `upstream` lets the site's `/api/*` routes call an API of the person's own,
+with headers attached so the key stays off the page: `origin`, `headers` (`[{ name, value }]`, encrypted on
+arrival and never shown again), `methods` (GET only unless opened), `removeHeaders`, or `remove: true`. A
+call needs a `_redirects` line ending in `200` that points at the origin. `get_site` reads it back as
+`apiProxy` — header names with the last four characters, never a value.
 
 To share a site for review, `invite_people` puts the addresses the person gave on its list and emails each
 one; `update_site` with `invitedOnly: true` makes the list the only way in, and `comments` decides who may

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { SiteDetail } from "../src/api.js";
-import { accessOf, describeSite, servingModeOf } from "../src/describe.js";
+import type { SiteDetail, SiteUpstreams } from "../src/api.js";
+import { accessOf, describeSite, describeUpstreams, servingModeOf } from "../src/describe.js";
 
 /**
  * How a site's settings read in `drop2run info` and the MCP server's `get_site`.
@@ -94,5 +94,64 @@ describe("servingModeOf", () => {
 		expect(servingModeOf({ spaMode: true, docsMode: false })).toBe("spa");
 		expect(servingModeOf({ spaMode: false, docsMode: true })).toBe("docs");
 		expect(servingModeOf({ spaMode: false, docsMode: false })).toBe("static");
+	});
+});
+
+describe("describeUpstreams", () => {
+	/** A Pro month part used, one upstream and one route. */
+	const API: SiteUpstreams = {
+		upstreams: [
+			{
+				id: "up1",
+				origin: "https://api.openai.com",
+				methods: ["GET", "POST"],
+				headers: [{ name: "authorization", last4: "Wq9z" }],
+				blocked: false,
+			},
+		],
+		limit: 5,
+		proxyBlocked: false,
+		routes: [{ from: "/api/*", to: "https://api.openai.com/v1/:splat" }],
+		allowance: {
+			perMonth: 1_000_000,
+			used: 182_400,
+			suspended: false,
+			resetsAt: "2026-11-01T00:00:00Z",
+		},
+	};
+
+	it("says nothing where the proxy is not available, so such a site reads as it always did", () => {
+		expect(describeUpstreams(null)).toEqual([]);
+		expect(describeSite(SITE)).not.toContain("api ");
+	});
+
+	it("lists the month, each upstream by header name and last four characters, and the routes", () => {
+		expect(describeUpstreams(API)).toEqual([
+			"  api       182,400 of 1,000,000 requests this month, every site of the account",
+			"    https://api.openai.com  GET, POST; authorization ••••Wq9z",
+			"    route /api/* → https://api.openai.com/v1/:splat",
+		]);
+	});
+
+	it("says why calls fail: a plan without it, a spent month, a platform switch, a blocked origin", () => {
+		expect(
+			describeUpstreams({
+				...API,
+				upstreams: [],
+				routes: [],
+				allowance: { ...API.allowance, perMonth: 0 },
+			}),
+		).toEqual(["  api       off (not on this plan)"]);
+		expect(
+			describeUpstreams({ ...API, allowance: { ...API.allowance, suspended: true } })[0],
+		).toContain("calls answer 429 until 2026-11-01");
+		expect(describeUpstreams({ ...API, proxyBlocked: true })[0]).toContain(
+			"switched off by Drop2Run",
+		);
+		const first = API.upstreams[0];
+		if (first === undefined) throw new Error("fixture");
+		expect(describeUpstreams({ ...API, upstreams: [{ ...first, blocked: true }] })[1]).toContain(
+			"calls answer 502",
+		);
 	});
 });

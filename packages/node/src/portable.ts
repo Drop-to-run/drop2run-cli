@@ -39,6 +39,7 @@ export {
 	promoteDeploy,
 	ROOT_FOLDER,
 	readInvitedOnly,
+	readUpstreams,
 	removePerson,
 	removeUpstream,
 	replyToComment,
@@ -66,7 +67,7 @@ export {
 	updateSiteSettings,
 } from "./api.js";
 export { type Credentials, DEFAULT_API_BASE_URL, dashboardUrlFor } from "./credentials.js";
-export { accessOf, describeSite, servingModeOf } from "./describe.js";
+export { accessOf, describeSite, describeUpstreams, servingModeOf } from "./describe.js";
 export {
 	type AuthoredFile,
 	describeEdge,

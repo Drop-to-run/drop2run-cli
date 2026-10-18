@@ -1332,6 +1332,35 @@ export async function listUpstreams(
 }
 
 /**
+ * Reads a site's API connections for a description, or null when there is nothing to describe.
+ *
+ * Null when the proxy is not switched on for the deployment (the API answers `proxy_unavailable`), and on any
+ * other failure too: `info` and `get_site` describe a whole site, and a part that cannot be read is left out
+ * rather than failing the rest — the shape of {@link readInvitedOnly}.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @returns The upstreams, routes and allowance, or null.
+ */
+export async function readUpstreams(
+	credentials: Credentials,
+	siteId: string,
+): Promise<SiteUpstreams | null> {
+	try {
+		const api = await listUpstreams(credentials, siteId);
+
+		// An answer of another shape — an older API, a proxy in between — is as unreadable as a failure.
+		return Array.isArray(api.upstreams) &&
+			Array.isArray(api.routes) &&
+			typeof api.allowance?.perMonth === "number"
+			? api
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Writes an origin the same way the API stores it, for matching one this package was given against one the
  * API returned: lowercase, no trailing slash.
  *

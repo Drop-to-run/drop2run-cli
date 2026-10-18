@@ -1310,6 +1310,31 @@ describe("update_site's upstream", () => {
 		);
 	});
 
+	it("lets get_site read back what update_site declared, by name and last four characters only", async () => {
+		vi.stubGlobal("fetch", stubApi([]));
+		const client = await connect();
+
+		await client.callTool({
+			name: "update_site",
+			arguments: {
+				site: "calm-cedar",
+				upstream: {
+					origin: "https://api.openai.com",
+					headers: [{ name: "authorization", value: "Bearer sk-secret-Wq9z" }],
+				},
+			},
+		});
+		const result = await client.callTool({ name: "get_site", arguments: { site: "calm-cedar" } });
+
+		expect(result.isError).toBeFalsy();
+		const proxy = (result.structuredContent as { apiProxy: { upstreams: { origin: string }[] } })
+			.apiProxy;
+		expect(proxy.upstreams.map((upstream) => upstream.origin)).toEqual(["https://api.openai.com"]);
+		const text = JSON.stringify(result.content);
+		expect(text).toContain("authorization ••••Wq9z");
+		expect(JSON.stringify(result)).not.toContain("sk-secret");
+	});
+
 	it("still refuses a call that names nothing to change", async () => {
 		vi.stubGlobal("fetch", stubApi([]));
 

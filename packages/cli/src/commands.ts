@@ -38,6 +38,7 @@ import {
 	promoteDeploy,
 	publishDirectory,
 	readProject,
+	readUpstreams,
 	removePerson,
 	removeUpstream,
 	replyToComment,
@@ -757,7 +758,10 @@ export async function info(site: string | undefined): Promise<CommandResult> {
 
 	try {
 		const summary = await findSite(found.credentials, target.named);
-		const detail = await getSite(found.credentials, summary.siteId);
+		const [detail, api] = await Promise.all([
+			getSite(found.credentials, summary.siteId),
+			readUpstreams(found.credentials, summary.siteId),
+		]);
 		const folderPath =
 			detail.folderId === null
 				? undefined
@@ -766,8 +770,14 @@ export async function info(site: string | undefined): Promise<CommandResult> {
 					)?.path;
 
 		return {
-			text: describeSite(detail, folderPath),
-			json: { ...detail, mode: servingModeOf(detail), folderPath: folderPath ?? null },
+			text: describeSite(detail, folderPath, api),
+			// `apiProxy` is null where the proxy is not switched on or could not be read.
+			json: {
+				...detail,
+				mode: servingModeOf(detail),
+				folderPath: folderPath ?? null,
+				apiProxy: api,
+			},
 			code: 0,
 		};
 	} catch (error) {

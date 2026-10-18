@@ -25,6 +25,8 @@ drop2run open [site]                         Open a site in a browser
 drop2run info [site]                         Show a site's settings and versions
 drop2run set <setting> <value> [--site X]    Change one setting
 drop2run unset name|password|expires         Clear a name, a password or a takedown
+drop2run set upstream <origin> [header]      Let /api/* routes call an API of yours (--methods GET,POST)
+drop2run unset upstream <origin> [header]    Remove an upstream and its keys, or one header
 drop2run pause [site]                        Take a site off the air, keeping its files
 drop2run resume [site]                       Put a paused site back on the air
 drop2run rollback <deployId> [--site X]      Put an earlier version back live
@@ -54,6 +56,19 @@ drop2run set comments invited --site calm-cedar                      # the peopl
 `drop2run people` shows the list and `drop2run uninvite` takes someone off it. `set comments anyone` lets
 anybody signed in comment instead, on a site you keep public or behind a password. Both are plan features,
 refused with the reason where the plan lacks them.
+
+## Calling your own API
+
+On paid plans a site's `/api/*` routes can call an API of yours with the key kept off the page:
+
+```bash
+drop2run set upstream https://api.openai.com authorization --site my-chat   # value typed at a hidden prompt
+```
+
+A header's value is never an argument — it is typed or piped in, one header per run — and is never shown
+again; `info` lists header names with the last four characters. Then point a `_redirects` line at the origin,
+such as `/api/* https://api.openai.com/:splat 200`. The rules are at
+[dropto.run/docs/redirects](https://dropto.run/docs/redirects#calling-your-own-api).
 
 ## Comments
 

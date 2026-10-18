@@ -1,4 +1,4 @@
-import type { SiteDetail } from "./api.js";
+import type { SiteDetail, SiteUpstreams } from "./api.js";
 
 /**
  * How a site's settings read in a terminal and in a chat.
@@ -59,6 +59,47 @@ function addressLines(site: SiteDetail): string[] {
 }
 
 /**
+ * The lines about a site's API proxy (docs/briefs/API-PROXY-BRIEF.md): the account's month, each upstream with
+ * its methods and header names — the last four characters of a value, never the value — and the live routes.
+ *
+ * Nothing when the proxy could not be read or is not switched on, so a deployment without it describes sites as
+ * it always did. A plan without the proxy and nothing declared reads as one line, like the other settings the
+ * plan does not include.
+ *
+ * @param api What {@link readUpstreams} returned.
+ * @returns The lines.
+ */
+export function describeUpstreams(api: SiteUpstreams | null): string[] {
+	if (api === null) return [];
+
+	const { allowance } = api;
+	if (allowance.perMonth <= 0 && api.upstreams.length === 0)
+		return ["  api       off (not on this plan)"];
+
+	const state = api.proxyBlocked
+		? "switched off by Drop2Run — its routes answer 404"
+		: allowance.perMonth <= 0
+			? "not on this plan — its routes answer 404"
+			: allowance.suspended
+				? `this month's ${allowance.perMonth.toLocaleString("en-US")} requests are spent — calls answer 429 until ${allowance.resetsAt.slice(0, 10)}`
+				: `${allowance.used.toLocaleString("en-US")} of ${allowance.perMonth.toLocaleString("en-US")} requests this month, every site of the account`;
+
+	return [
+		`  api       ${state}`,
+		...api.upstreams.map((upstream) => {
+			const headers =
+				upstream.headers.length === 0
+					? "no headers"
+					: upstream.headers.map((header) => `${header.name} ••••${header.last4}`).join(", ");
+			const blocked = upstream.blocked ? " — blocked by Drop2Run, calls answer 502" : "";
+			return `    ${upstream.origin}  ${upstream.methods.join(", ")}; ${headers}${blocked}`;
+		}),
+		...(api.upstreams.length === 0 ? ["    no upstream declared"] : []),
+		...api.routes.map((route) => `    route ${route.from} → ${route.to}`),
+	];
+}
+
+/**
  * Describes a site's settings, state and recent versions as lines of text.
  *
  * A setting the plan does not include says so, because "off" alone reads as something that could be
@@ -67,9 +108,14 @@ function addressLines(site: SiteDetail): string[] {
  * @param site The site, as {@link getSite} reads it.
  * @param folderPath The path of the folder it is filed in, when the caller looked it up; the id is
  * shown otherwise.
+ * @param api The site's API connections, from {@link readUpstreams}; left out when absent or null.
  * @returns The description.
  */
-export function describeSite(site: SiteDetail, folderPath?: string): string {
+export function describeSite(
+	site: SiteDetail,
+	folderPath?: string,
+	api: SiteUpstreams | null = null,
+): string {
 	const unavailable = (available: boolean) => (available ? "" : " (not on this plan)");
 	const versions = site.deploys.slice(0, VERSIONS_LISTED).map((deploy) => {
 		// Marked from the site's own pointer as well as the status, which is the one a rollback moves.
@@ -92,6 +138,7 @@ export function describeSite(site: SiteDetail, folderPath?: string): string {
 		`  takedown  ${site.expiresAt === null ? "none" : `${site.expiresAt} (${site.expiryAction})`}${unavailable(site.scheduledExpiryAvailable)}`,
 		`  folder    ${site.folderId === null ? "(top level)" : (folderPath ?? site.folderId)}`,
 		...addressLines(site),
+		...describeUpstreams(api),
 		"",
 		site.deploys.length === 0 ? "No versions yet." : "Versions, newest first:",
 		...versions,

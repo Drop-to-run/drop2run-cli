@@ -20,6 +20,7 @@ import {
 	type PublishResult,
 	promoteDeploy,
 	publishFiles,
+	readUpstreams,
 	removePerson,
 	removeUpstream,
 	replyToComment,
@@ -27,6 +28,7 @@ import {
 	resolveFolderTarget,
 	type SiteDetail,
 	type SiteSettingsChange,
+	type SiteUpstreams,
 	servingModeOf,
 	setCommentResolved,
 	setSitePaused,
@@ -546,10 +548,35 @@ async function folderPathOf(
  * A site's detail as `get_site` structures it.
  *
  * @param site The site.
+ * @param api Its API connections, or null where the proxy is not available.
  * @returns The structured answer.
  */
-function structuredSite(site: SiteDetail): Record<string, unknown> {
+function structuredSite(
+	site: SiteDetail,
+	api: SiteUpstreams | null = null,
+): Record<string, unknown> {
 	return {
+		// Null where the proxy is not switched on or could not be read; never a header value.
+		apiProxy:
+			api === null
+				? null
+				: {
+						perMonth: api.allowance.perMonth,
+						used: api.allowance.used,
+						suspended: api.allowance.suspended,
+						resetsAt: api.allowance.resetsAt,
+						switchedOff: api.proxyBlocked,
+						upstreams: api.upstreams.map((upstream) => ({
+							origin: upstream.origin,
+							methods: [...upstream.methods],
+							headers: upstream.headers.map((header) => ({
+								name: header.name,
+								last4: header.last4,
+							})),
+							blocked: upstream.blocked,
+						})),
+						routes: api.routes.map((route) => ({ from: route.from, to: route.to })),
+					},
 		siteId: site.siteId,
 		subdomain: site.subdomain,
 		url: site.url,
@@ -854,7 +881,9 @@ export function instructionsFor(surface: Surface): string {
 		"",
 		"An existing site's settings are read with get_site and changed with update_site: its name,",
 		"serving mode (static, spa, docs), a password, whether forms accept submissions, a scheduled",
-		"takedown, and its folder. pause_site and resume_site take it off the air and back without",
+		"takedown, its folder, and the APIs its /api/* routes may call (`upstream`, with the headers",
+		"to attach — take keys only from the person; they are never shown again). pause_site and",
+		"resume_site take it off the air and back without",
 		"deleting anything, and rollback_site serves an earlier version from get_site's list. Use",
 		"a password or a date only when the person gave one, and scheduling a deletion asks for",
 		"`confirm` the way delete_site does.",
@@ -1213,16 +1242,50 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 				formerSubdomains: z
 					.array(z.string())
 					.describe("The subdomains it used to answer on, newest first; each redirects to it."),
+				apiProxy: z
+					.object({
+						perMonth: z
+							.number()
+							.describe("Proxied requests the plan allows a month; 0 when it has none."),
+						used: z.number().describe("Proxied requests this month, every site of the account."),
+						suspended: z.boolean().describe("Whether the month is spent and calls answer 429."),
+						resetsAt: z.string().describe("When the count starts again."),
+						switchedOff: z.boolean().describe("Whether Drop2Run switched this site's proxy off."),
+						upstreams: z
+							.array(
+								z.object({
+									origin: z.string(),
+									methods: z.array(z.string()),
+									headers: z
+										.array(z.object({ name: z.string(), last4: z.string() }))
+										.describe("Header names and each value's last four characters; never a value."),
+									blocked: z
+										.boolean()
+										.describe("Whether Drop2Run blocked this origin for every site."),
+								}),
+							)
+							.describe(
+								"Origins its /api/* routes may call, as update_site's `upstream` sets them.",
+							),
+						routes: z
+							.array(z.object({ from: z.string(), to: z.string() }))
+							.describe("Proxy routes in the live version's _redirects."),
+					})
+					.nullable()
+					.describe("Its API proxy, or null where the proxy is not available."),
 			},
 		},
 		({ site }) =>
 			withCredentials(context, async (credentials) => {
 				const found = await findSite(credentials, site);
-				const detail = await getSite(credentials, found.siteId);
+				const [detail, api] = await Promise.all([
+					getSite(credentials, found.siteId),
+					readUpstreams(credentials, found.siteId),
+				]);
 
 				return report(
-					describeSite(detail, await folderPathOf(credentials, detail.folderId)),
-					structuredSite(detail),
+					describeSite(detail, await folderPathOf(credentials, detail.folderId), api),
+					structuredSite(detail, api),
 				);
 			}),
 	);
