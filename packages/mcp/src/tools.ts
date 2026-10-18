@@ -280,6 +280,8 @@ const THREAD_OUTPUT = z.object({
 			"True when it was opened on an earlier version; the words it points at may have changed.",
 		),
 	resolved: z.boolean().describe("Whether it is resolved."),
+	resolvedBy: z.string().nullable().describe("Who resolved it, by name, or null while open."),
+	resolvedAt: z.string().nullable().describe("When it was resolved, ISO 8601, or null while open."),
 	comments: z.array(
 		z.object({
 			author: z.string().describe("Who wrote it, by name."),
@@ -309,6 +311,8 @@ function structuredThread(thread: CommentThread): z.infer<typeof THREAD_OUTPUT> 
 		selector: thread.place.selector,
 		outdated: thread.outdated,
 		resolved: thread.resolvedAt !== null,
+		resolvedBy: thread.resolvedAt === null ? null : thread.resolvedBy,
+		resolvedAt: thread.resolvedAt,
 		comments: thread.comments.map((comment) => ({
 			author: comment.author.name,
 			owner: comment.author.owner,
@@ -336,7 +340,9 @@ function describeThread(thread: CommentThread): string {
 				? ` — near "${thread.place.snippet}"`
 				: "";
 	const state = [
-		thread.resolvedAt === null ? "open" : `resolved by ${thread.resolvedBy ?? "someone"}`,
+		thread.resolvedAt === null
+			? "open"
+			: `resolved by ${thread.resolvedBy ?? "someone"} at ${thread.resolvedAt}`,
 		...(thread.outdated ? ["opened on an earlier version"] : []),
 	].join(", ");
 
@@ -1611,9 +1617,13 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 				people: z.array(
 					z.object({
 						email: z.string(),
-						role: z.string().describe("`view` or `comment`."),
+						role: z.string().describe("`view` or `comment`; `owner` on the owner's row."),
 						owner: z.boolean().describe("Whether this is the site's owner."),
-						status: z.string().describe("`opened` or `not-opened`."),
+						status: z
+							.string()
+							.describe(
+								"`opened` or `not-opened`; `owner` on the owner's row, whose visits are not tracked.",
+							),
 					}),
 				),
 			},
@@ -1624,7 +1634,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 				const list = await listPeople(credentials, found.siteId);
 				const rows = list.people.map(
 					(person) =>
-						`  ${person.email}  ${person.role}${person.owner ? ", owner" : ""}, ${person.status}`,
+						`  ${person.email}  ${person.owner ? "owner" : `${person.role}, ${person.status}`}`,
 				);
 
 				return report(

@@ -710,9 +710,10 @@ describe("the comment tools", () => {
 	 * Answers the calls the comment tools make, recording each one.
 	 *
 	 * @param seen Collects `METHOD path body` for every request.
+	 * @param thread The thread every read answers with.
 	 * @returns The fetch stub.
 	 */
-	function stubApi(seen: string[]) {
+	function stubApi(seen: string[], thread: typeof THREAD | ResolvedThread = THREAD) {
 		process.env.DROP2RUN_TOKEN = "d2r_test";
 
 		return vi.fn(async (input: string | URL, init?: RequestInit) => {
@@ -732,12 +733,37 @@ describe("the comment tools", () => {
 				});
 			}
 			if (url.pathname.endsWith("/feedback/threads")) {
-				return Response.json({ cursor: 41, threads: [THREAD], page: 0, more: false });
+				return Response.json({ cursor: 41, threads: [thread], page: 0, more: false });
 			}
 
-			return Response.json(THREAD);
+			return Response.json(thread);
 		});
 	}
+
+	/** {@link THREAD} once somebody other than the agent resolved it. */
+	type ResolvedThread = Omit<typeof THREAD, "resolvedAt" | "resolvedBy"> & {
+		resolvedAt: string;
+		resolvedBy: string;
+	};
+
+	it("says who resolved a thread and when, not only that it is resolved", async () => {
+		const resolved: ResolvedThread = {
+			...THREAD,
+			resolvedAt: "2026-10-09T03:00:00Z",
+			resolvedBy: "Cam",
+		};
+		vi.stubGlobal("fetch", stubApi([], resolved));
+
+		const result = await (await connect()).callTool({
+			name: "list_comments",
+			arguments: { site: "calm-cedar", status: "all" },
+		});
+
+		expect(result.structuredContent).toMatchObject({
+			threads: [{ resolved: true, resolvedBy: "Cam", resolvedAt: "2026-10-09T03:00:00Z" }],
+		});
+		expect(JSON.stringify(result.content)).toContain("resolved by Cam at 2026-10-09T03:00:00Z");
+	});
 
 	it("needs the site, and the thread for anything that acts on one", async () => {
 		const { tools } = await (await connect()).listTools();
@@ -796,6 +822,8 @@ describe("the comment tools", () => {
 					id: "01JTHREAD",
 					quote: "free tier",
 					resolved: false,
+					resolvedBy: null,
+					resolvedAt: null,
 					comments: [
 						{ author: "Cam", viaApi: false },
 						{ author: "Olivia", owner: true, viaApi: true },
@@ -1023,8 +1051,9 @@ describe("the sharing tools", () => {
 		expect(listed.structuredContent).toMatchObject({
 			invitedOnly: true,
 			people: [
-				{ email: "olivia@example.com", role: "comment", owner: true, status: "opened" },
-				{ status: "not-opened" },
+				// The API answers `Comment` and `Opened` for the owner here; neither describes an owner.
+				{ email: "olivia@example.com", role: "owner", owner: true, status: "owner" },
+				{ role: "comment", owner: false, status: "not-opened" },
 			],
 		});
 		expect(seen).toContain("DELETE /api/sites/01J/viewers?email=client%40example.com");

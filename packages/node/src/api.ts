@@ -1159,11 +1159,14 @@ export type PersonRole = "view" | "comment";
 export interface SitePerson {
 	/** Their address — the owner's own list, so it is not hidden here. */
 	readonly email: string;
-	/** `view` or `comment`. */
+	/** `view` or `comment`, or `owner` on the owner's own row. */
 	readonly role: string;
 	/** Whether this row is the site's owner. */
 	readonly owner: boolean;
-	/** Whether they have opened the site yet: `opened` or `not-opened`. */
+	/**
+	 * Whether they have opened the site yet: `opened` or `not-opened`, or `owner` on the owner's own row,
+	 * which is never asked to accept and so is never recorded as opened.
+	 */
 	readonly status: string;
 }
 
@@ -1202,11 +1205,14 @@ export async function listPeople(credentials: Credentials, siteId: string): Prom
 		invitedOnly: page.invitedOnly,
 		total: page.total,
 		limit: page.limit,
+		// The owner's row carries a stored role it never acts under, and reads `NotOpened` because opening is
+		// recorded by accepting, which the owner is never asked to do. Both would tell a reader the owner is
+		// a viewer who has not looked yet.
 		people: page.viewers.map((row) => ({
 			email: row.email,
-			role: enumName(row.role),
+			role: row.owner ? "owner" : enumName(row.role),
 			owner: row.owner,
-			status: enumName(row.status),
+			status: row.owner ? "owner" : enumName(row.status),
 		})),
 	};
 }

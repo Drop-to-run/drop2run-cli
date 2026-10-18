@@ -1380,9 +1380,8 @@ export async function people(site: string | undefined): Promise<CommandResult> {
 			(list.invitedOnly
 				? "Only they can open it."
 				: "It is not invite-only, so anybody with the link can open it — `drop2run set invite-only on`.");
-		const rows = list.people.map(
-			(person) =>
-				`${person.email}\t${person.role}${person.owner ? ", owner" : ""}\t${person.status}`,
+		const rows = list.people.map((person) =>
+			person.owner ? `${person.email}\towner` : `${person.email}\t${person.role}\t${person.status}`,
 		);
 
 		return { text: [head, ...rows].join("\n"), json: list, code: 0 };
