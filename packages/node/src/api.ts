@@ -1339,7 +1339,18 @@ export async function listUpstreams(
  * @returns The comparable form.
  */
 function originKey(origin: string): string {
-	return origin.trim().toLowerCase().replace(/\/+$/, "");
+	const typed = origin.trim();
+
+	// The way the API's NormalizeOrigin stores it: host in punycode, lowercase, without a trailing dot, and the
+	// default port dropped — so `https://API.example.com.:443/` finds the upstream stored as
+	// `https://api.example.com`. A string the URL parser rejects is compared as typed, lowercased, and the API
+	// answers for it.
+	try {
+		const url = new URL(typed);
+		return `${url.protocol}//${url.hostname.replace(/\.$/, "")}${url.port === "" ? "" : `:${url.port}`}`;
+	} catch {
+		return typed.toLowerCase().replace(/\/+$/, "");
+	}
 }
 
 /**
@@ -1354,6 +1365,7 @@ function originKey(origin: string): string {
  * @param origin `https://host`.
  * @param headers Headers to set, values in plain text.
  * @param methods Methods visitors may send; GET only on a new upstream when left out.
+ * @param removeHeaders Header names to drop from an existing upstream, in the same request as the sets.
  * @returns The upstream as it now stands, and whether it was new.
  */
 export async function setUpstream(
@@ -1362,12 +1374,14 @@ export async function setUpstream(
 	origin: string,
 	headers: readonly UpstreamHeaderInput[],
 	methods?: readonly string[],
+	removeHeaders: readonly string[] = [],
 ): Promise<{ readonly upstream: Upstream; readonly created: boolean }> {
 	const existing = (await listUpstreams(credentials, siteId)).upstreams.find(
 		(upstream) => originKey(upstream.origin) === originKey(origin),
 	);
 	const base = `sites/${encodeURIComponent(siteId)}/upstreams`;
 
+	// A new upstream has no headers to remove, so `removeHeaders` has nothing to act on there.
 	if (existing === undefined) {
 		const upstream = await call<Upstream>(credentials, base, {
 			method: "POST",
@@ -1376,9 +1390,14 @@ export async function setUpstream(
 		return { upstream, created: true };
 	}
 
+	// One PATCH for removals and sets together, so a set the API refuses does not leave a removal behind.
 	const upstream = await call<Upstream>(credentials, `${base}/${encodeURIComponent(existing.id)}`, {
 		method: "PATCH",
-		body: JSON.stringify({ setHeaders: headers, ...(methods ? { methods } : {}) }),
+		body: JSON.stringify({
+			setHeaders: headers,
+			...(removeHeaders.length > 0 ? { removeHeaders } : {}),
+			...(methods ? { methods } : {}),
+		}),
 	});
 	return { upstream, created: false };
 }

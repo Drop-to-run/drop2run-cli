@@ -1159,6 +1159,12 @@ describe("update_site's upstream", () => {
 				upstreams.push(created);
 				return Response.json(created);
 			}
+			if (url.pathname === "/api/sites/01J/upstreams/up1" && method === "PATCH") {
+				const kept = upstreams[0];
+				if (kept === undefined)
+					return Response.json({ type: "upstream_not_found" }, { status: 404 });
+				return Response.json(kept);
+			}
 			if (url.pathname === "/api/sites/01J/upstreams/up1" && method === "DELETE") {
 				upstreams.splice(0);
 				return new Response(null, { status: 204 });
@@ -1238,6 +1244,70 @@ describe("update_site's upstream", () => {
 		expect(result.isError).toBeFalsy();
 		expect(JSON.stringify(result.content)).toContain("removed with its keys");
 		expect(seen).toContain("DELETE /api/sites/01J/upstreams/up1");
+	});
+
+	it("writes no upstream when the settings beside it are refused before any request", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+
+		const result = await (await connect()).callTool({
+			name: "update_site",
+			arguments: {
+				site: "calm-cedar",
+				expiryAction: "delete",
+				upstream: {
+					origin: "https://api.openai.com",
+					headers: [{ name: "authorization", value: "k-1234" }],
+				},
+			},
+		});
+
+		expect(result.isError).toBe(true);
+		expect(seen.some((call) => call.startsWith("POST /api/sites/01J/upstreams"))).toBe(false);
+	});
+
+	it("refuses `remove` beside the fields that would change the upstream it removes", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+
+		const result = await (await connect()).callTool({
+			name: "update_site",
+			arguments: {
+				site: "calm-cedar",
+				upstream: { origin: "https://api.openai.com", remove: true, methods: ["GET"] },
+			},
+		});
+
+		expect(result.isError).toBe(true);
+		expect(seen.some((call) => call.startsWith("DELETE"))).toBe(false);
+	});
+
+	it("finds an upstream however its origin is written, and changes it in one request", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+		const client = await connect();
+
+		await client.callTool({
+			name: "update_site",
+			arguments: { site: "calm-cedar", upstream: { origin: "https://api.openai.com" } },
+		});
+		const result = await client.callTool({
+			name: "update_site",
+			arguments: {
+				site: "calm-cedar",
+				upstream: {
+					origin: "HTTPS://API.OpenAI.com.:443/",
+					headers: [{ name: "authorization", value: "Bearer new-9999" }],
+					removeHeaders: ["x-old"],
+				},
+			},
+		});
+
+		expect(result.isError).toBeFalsy();
+		expect(seen.filter((call) => call.startsWith("POST /api/sites/01J/upstreams"))).toHaveLength(1);
+		expect(seen).toContain(
+			'PATCH /api/sites/01J/upstreams/up1 {"setHeaders":[{"name":"authorization","value":"Bearer new-9999"}],"removeHeaders":["x-old"]}',
+		);
 	});
 
 	it("still refuses a call that names nothing to change", async () => {

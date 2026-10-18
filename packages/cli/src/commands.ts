@@ -888,6 +888,12 @@ function settingChange(
 					"Run it once per header. Name the site with `--site <subdomain>`.",
 			};
 		}
+		// An empty name is a quoting slip, not "no header": answering it with an upstream and exit 0 hides it.
+		if (values[1] !== undefined && values[1].trim() === "") {
+			return {
+				refusal: "`set upstream` was given an empty header name. Name the header, or leave it out.",
+			};
+		}
 		return { upstream: { origin: values[0], ...(values[1] ? { header: values[1] } : {}) } };
 	}
 

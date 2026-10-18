@@ -416,26 +416,35 @@ async function applyUpstream(
 	siteId: string,
 	input: NonNullable<z.infer<typeof UPSTREAM_INPUT>>,
 ): Promise<string[]> {
+	const removing = input.removeHeaders ?? [];
+
 	if (input.remove === true) {
+		// Refused rather than half done: the other fields describe a change to an upstream about to go.
+		if ((input.headers ?? []).length > 0 || input.methods !== undefined || removing.length > 0) {
+			throw new Error(
+				"`remove: true` deletes the whole upstream, so `headers`, `methods` and `removeHeaders` do not " +
+					"apply. Send `remove` alone, or leave it out to change the upstream.",
+			);
+		}
 		await removeUpstream(credentials, siteId, input.origin);
 		return [`  upstream  ${input.origin} removed with its keys; routes to it now answer 502.`];
 	}
 
-	const removing = input.removeHeaders ?? [];
-	if (removing.length > 0) await removeUpstream(credentials, siteId, input.origin, removing);
-
-	// Only dropping headers: nothing to set afterwards. An origin alone is a set — an upstream with no
+	// Only dropping headers: one request that removes them. An origin alone is a set — an upstream with no
 	// headers is a public API, and a valid one.
 	if (removing.length > 0 && (input.headers ?? []).length === 0 && input.methods === undefined) {
+		await removeUpstream(credentials, siteId, input.origin, removing);
 		return [`  upstream  ${input.origin}: removed ${removing.join(", ")}.`];
 	}
 
+	// Removals and sets in one request, so a set the API refuses does not leave a removal behind.
 	const { upstream, created } = await setUpstream(
 		credentials,
 		siteId,
 		input.origin,
 		input.headers ?? [],
 		input.methods,
+		removing,
 	);
 
 	const headers =
@@ -1316,6 +1325,27 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 			withCredentials(context, async (credentials) => {
 				const found = await findSite(credentials, site);
 
+				// The refusals that need no request come before anything is written, so a call refused for its
+				// settings never leaves its upstream half applied.
+				if (expiryAction !== undefined && expiresAt === undefined) {
+					throw new Error("`expiryAction` only applies with `expiresAt` — send the date too.");
+				}
+
+				// A scheduled deletion is a deletion with a delay, so it asks what delete_site asks: the
+				// subdomain, told by the person, compared against the site that would actually go. Not on
+				// a cancellation (`expiresAt: ""`), which schedules nothing.
+				if (
+					expiryAction === "delete" &&
+					expiresAt !== "" &&
+					confirm?.trim().toLowerCase() !== found.subdomain.toLowerCase()
+				) {
+					throw new Error(
+						`Refusing to schedule ${found.subdomain} for deletion: \`confirm\` said ` +
+							`"${confirm ?? ""}". Repeat the subdomain exactly to go ahead, or use ` +
+							"`expiryAction: pause`, which keeps the files.",
+					);
+				}
+
 				// The proxy's upstream first and on its own: it is a separate record from the settings, and a
 				// change that only names an upstream must not be refused as "nothing to change".
 				const upstreamLines =
@@ -1351,40 +1381,32 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 					});
 				}
 
-				if (expiryAction !== undefined && expiresAt === undefined) {
-					throw new Error("`expiryAction` only applies with `expiresAt` — send the date too.");
-				}
-
-				// A scheduled deletion is a deletion with a delay, so it asks what delete_site asks: the
-				// subdomain, told by the person, compared against the site that would actually go. Not on
-				// a cancellation (`expiresAt: ""`), which schedules nothing.
-				if (
-					expiryAction === "delete" &&
-					expiresAt !== "" &&
-					confirm?.trim().toLowerCase() !== found.subdomain.toLowerCase()
-				) {
+				let settings: Awaited<ReturnType<typeof updateSiteSettings>>;
+				try {
+					const change: SiteSettingsChange = {
+						name,
+						mode,
+						password,
+						expiresAt,
+						// Dropped on a cancellation: the API reads an action only with a date, and sending
+						// `delete` alongside an empty date would still run its owner-only check for nothing.
+						expiryAction: expiresAt === "" ? undefined : expiryAction,
+						formsEnabled: forms,
+						folderId:
+							folder === undefined ? undefined : await resolveFolderTarget(credentials, folder),
+						invitedOnly,
+						comments,
+					};
+					settings = await updateSiteSettings(credentials, found.siteId, change);
+				} catch (failure) {
+					// The upstream went through before the settings were refused — a plan refusal, a folder that
+					// does not exist. Said, so a retry does not read "updated" and wonder what changed.
+					if (upstreamLines.length === 0) throw failure;
+					const reason = failure instanceof Error ? failure.message : String(failure);
 					throw new Error(
-						`Refusing to schedule ${found.subdomain} for deletion: \`confirm\` said ` +
-							`"${confirm ?? ""}". Repeat the subdomain exactly to go ahead, or use ` +
-							"`expiryAction: pause`, which keeps the files.",
+						`${upstreamLines.join("\n")}\nThat upstream change was saved, but the settings were not: ${reason}`,
 					);
 				}
-
-				const change: SiteSettingsChange = {
-					name,
-					mode,
-					password,
-					expiresAt,
-					// Dropped on a cancellation: the API reads an action only with a date, and sending
-					// `delete` alongside an empty date would still run its owner-only check for nothing.
-					expiryAction: expiresAt === "" ? undefined : expiryAction,
-					formsEnabled: forms,
-					folderId:
-						folder === undefined ? undefined : await resolveFolderTarget(credentials, folder),
-					invitedOnly,
-					comments,
-				};
-				const settings = await updateSiteSettings(credentials, found.siteId, change);
 				const lines = [
 					`Updated ${found.subdomain}.`,
 					`  access    ${accessOf(settings)}`,

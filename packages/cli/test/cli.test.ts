@@ -1634,7 +1634,27 @@ describe("set upstream and unset upstream", () => {
 			"--site",
 			"calm-cedar",
 		]);
+		const methodsEmpty = await run([
+			"set",
+			"upstream",
+			"https://api.example.com",
+			"--methods",
+			"--site",
+			"calm-cedar",
+		]);
+		const emptyHeader = await run([
+			"set",
+			"upstream",
+			"https://api.example.com",
+			"",
+			"--site",
+			"calm-cedar",
+		]);
 
+		expect(methodsEmpty.code).toBe(1);
+		expect(methodsEmpty.text).toContain("--methods");
+		expect(emptyHeader.code).toBe(1);
+		expect(emptyHeader.text).toContain("empty header name");
 		expect(twoHeaders.code).toBe(1);
 		expect(twoHeaders.text).toContain("once per header");
 		expect(badMethod.code).toBe(1);

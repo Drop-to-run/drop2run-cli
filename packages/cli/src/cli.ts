@@ -347,6 +347,16 @@ export async function run(commandLine: readonly string[]): Promise<CommandResult
 		return json ? { ...failed, text: JSON.stringify(failed.json, null, 2) } : failed;
 	}
 
+	// For `--then`'s reason: typed with no value it would read as absent, and a new upstream would be made
+	// GET-only by a command that asked for something else.
+	const methods = flagValue(argv, "--methods");
+	if (argv.includes("--methods") && methods === undefined) {
+		const message = "`--methods` needs a value, such as `--methods GET,POST`.";
+		const failed = { text: message, json: { error: message }, code: 1 };
+
+		return json ? { ...failed, text: JSON.stringify(failed.json, null, 2) } : failed;
+	}
+
 	const result = await dispatch(
 		command,
 		rest,
@@ -362,7 +372,7 @@ export async function run(commandLine: readonly string[]): Promise<CommandResult
 			resolve: argv.includes("--resolve"),
 		},
 		flagValue(argv, "--role"),
-		flagValue(argv, "--methods"),
+		methods,
 	);
 
 	return json ? { ...result, text: JSON.stringify(result.json, null, 2) } : result;
