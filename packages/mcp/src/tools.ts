@@ -492,7 +492,9 @@ const VERSION_OUTPUT = z.object({
 	filesKept: z
 		.boolean()
 		.describe(
-			"Whether its files are still stored; a version without them cannot be rolled back to.",
+			"Whether its files are still stored; a version without them cannot be rolled back to. " +
+				"The plan keeps the files of its last few versions that were live, the live one " +
+				"included, and lets go of older ones as newer ones go live — by count, not by age.",
 		),
 	live: z.boolean().describe("Whether this is the version being served."),
 });
