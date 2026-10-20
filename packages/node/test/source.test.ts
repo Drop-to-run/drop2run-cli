@@ -112,7 +112,11 @@ describe("directorySource", () => {
 
 	it("skips a symlink inside the folder that points at something the filter leaves out", async () => {
 		// `info.txt -> .env` passed the filter as `info.txt` and published the secrets under that name.
-		const root = tree({ "index.html": "x", ".env": "API_KEY=SECRET", ".git/config": "token=SECRET" });
+		const root = tree({
+			"index.html": "x",
+			".env": "API_KEY=SECRET",
+			".git/config": "token=SECRET",
+		});
 		symlinkSync(join(root, ".env"), join(root, "info.txt"));
 		mkdirSync(join(root, "docs"));
 		symlinkSync(join(root, ".git/config"), join(root, "docs/notes.txt"));

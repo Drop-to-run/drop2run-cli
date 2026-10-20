@@ -50,7 +50,12 @@ export function directorySource(root: string): DeploySource {
  *   (`a/b/loop -> ../../a`) is inside the root and passed every other check, so without this the walk
  *   re-read the same tree until the file cap tripped — or forever, for a tree of links and no files.
  */
-async function walk(root: string, directory: string, into: CollectedFile[], seen: Set<string>): Promise<void> {
+async function walk(
+	root: string,
+	directory: string,
+	into: CollectedFile[],
+	seen: Set<string>,
+): Promise<void> {
 	const resolved = await realpath(directory);
 	if (seen.has(resolved)) return;
 	seen.add(resolved);
