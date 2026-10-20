@@ -110,6 +110,34 @@ describe("directorySource", () => {
 		expect(files.map((file) => file.path)).toEqual(["index.html"]);
 	});
 
+	it("skips a symlink inside the folder that points at something the filter leaves out", async () => {
+		// `info.txt -> .env` passed the filter as `info.txt` and published the secrets under that name.
+		const root = tree({ "index.html": "x", ".env": "API_KEY=SECRET", ".git/config": "token=SECRET" });
+		symlinkSync(join(root, ".env"), join(root, "info.txt"));
+		mkdirSync(join(root, "docs"));
+		symlinkSync(join(root, ".git/config"), join(root, "docs/notes.txt"));
+
+		const files = await directorySource(root)();
+
+		expect(files.map((file) => file.path)).toEqual(["index.html"]);
+		expect(
+			files.some((file) => new TextDecoder().decode(file.bytes as Uint8Array).includes("SECRET")),
+		).toBe(false);
+	});
+
+	it("reads a directory once when a symlink loops back into it", async () => {
+		// A link to an ancestor inside the folder is not an escape, so only remembering what was read
+		// stops the walk going round it until the file cap — or forever, with no files to count.
+		const root = tree({ "index.html": "x", "a/b/page.html": "y" });
+		symlinkSync(join(root, "a"), join(root, "a/b/loop"));
+		mkdirSync(join(root, "only-links"));
+		symlinkSync(join(root, "only-links"), join(root, "only-links/self"));
+
+		const files = await directorySource(root)();
+
+		expect(files.map((file) => file.path).sort()).toEqual(["a/b/page.html", "index.html"]);
+	});
+
 	it("skips a broken symlink rather than failing the publish", async () => {
 		const root = tree({ "index.html": "x" });
 		symlinkSync(join(root, "does-not-exist"), join(root, "dangling.html"));

@@ -1,5 +1,5 @@
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { type CollectedFile, type DeploySource, shouldIgnore } from "@drop2run/core";
 
 /**
@@ -34,7 +34,7 @@ export function directorySource(root: string): DeploySource {
 	return async () => {
 		const base = await realpath(root);
 		const files: CollectedFile[] = [];
-		await walk(base, base, files);
+		await walk(base, base, files, new Set());
 
 		return files;
 	};
@@ -46,8 +46,15 @@ export function directorySource(root: string): DeploySource {
  * @param root The publish root, already resolved, which every path is relative to.
  * @param directory Directory being read.
  * @param into Accumulator, appended in place.
+ * @param seen Directories already read, by their resolved path. A link to a directory that contains it
+ *   (`a/b/loop -> ../../a`) is inside the root and passed every other check, so without this the walk
+ *   re-read the same tree until the file cap tripped — or forever, for a tree of links and no files.
  */
-async function walk(root: string, directory: string, into: CollectedFile[]): Promise<void> {
+async function walk(root: string, directory: string, into: CollectedFile[], seen: Set<string>): Promise<void> {
+	const resolved = await realpath(directory);
+	if (seen.has(resolved)) return;
+	seen.add(resolved);
+
 	for (const entry of await readdir(directory, { withFileTypes: true })) {
 		const full = join(directory, entry.name);
 		const path = relative(root, full).split(sep).join("/");
@@ -64,14 +71,19 @@ async function walk(root: string, directory: string, into: CollectedFile[]): Pro
 			const target = await realpath(full).catch(() => null);
 			if (target === null || escapesRoot(root, target)) continue;
 
+			// The filter asked of where the link points, not only of its own name. `info.txt -> ../.env`
+			// passed it as `info.txt` and published the secrets the filter exists to keep back — inside
+			// the root, so the check above let it through.
+			if (shouldIgnore(relative(root, target).split(sep).join("/"))) continue;
+
 			const targeted = await stat(target);
 			if (targeted.isDirectory()) {
-				await walk(root, target, into);
+				await walk(root, target, into, seen);
 				continue;
 			}
 			if (!targeted.isFile()) continue;
 		} else if (entry.isDirectory()) {
-			await walk(root, full, into);
+			await walk(root, full, into, seen);
 			continue;
 		} else if (!entry.isFile()) {
 			// Sockets, fifos and devices. Reading one either blocks forever or returns nothing useful.
@@ -99,5 +111,7 @@ async function walk(root: string, directory: string, into: CollectedFile[]): Pro
 function escapesRoot(root: string, candidate: string): boolean {
 	const inside = relative(root, candidate);
 
-	return inside === "" || inside.startsWith("..");
+	// Absolute when there is no relative path at all — on Windows, a target on another drive, which
+	// `relative` returns as `D:\…` rather than anything starting with `..`.
+	return inside === "" || inside.startsWith("..") || isAbsolute(inside);
 }
