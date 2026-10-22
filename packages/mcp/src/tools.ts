@@ -105,12 +105,15 @@ export const REPLACES_A_SITE = {
 /**
  * Reads and changes nothing.
  *
- * `destructiveHint` and `idempotentHint` are left off rather than set to safe-looking values: the spec
- * gives them meaning only when `readOnlyHint` is false, and writing them here would suggest this tool
- * was weighed on a scale that does not apply to it.
+ * `destructiveHint` is spelled out even though the MCP spec gives it meaning only when `readOnlyHint` is
+ * false: OpenAI's plugin review refuses any tool whose read-only, destructive and open-world hints are not
+ * all explicit booleans (`annotations_required`), and a host that reads the field without the spec's
+ * caveat would otherwise fall back to its default, which is `true`. `idempotentHint` stays off — no
+ * directory asks for it, and reading twice is idempotent by definition.
  */
 const READS_ONLY = {
 	readOnlyHint: true,
+	destructiveHint: false,
 	openWorldHint: true,
 } as const;
 
@@ -1058,9 +1061,10 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 							"call rather than guessing which site was meant.",
 					),
 			},
+			// No `siteId`: nothing can take the id of a site that is gone, and a directory review counts an
+			// identifier no tool consumes as data the answer did not need.
 			outputSchema: {
-				siteId: z.string().describe("Identifier of the site that was deleted."),
-				subdomain: z.string().describe("Its subdomain, now unclaimed."),
+				subdomain: z.string().describe("Its subdomain, which stays reserved."),
 			},
 		},
 		({ site, confirm }) =>
@@ -1084,7 +1088,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 				return report(
 					`Deleted ${found.subdomain}. Its files and history are gone; the subdomain stays ` +
 						"reserved and cannot be used again.",
-					{ siteId: found.siteId, subdomain: found.subdomain },
+					{ subdomain: found.subdomain },
 				);
 			}),
 	);

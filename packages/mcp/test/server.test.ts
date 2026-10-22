@@ -308,14 +308,15 @@ describe("what each tool admits it does", () => {
 		}
 	});
 
-	it("marks both listings read-only, and leaves the write hints off them", async () => {
-		// The spec gives `destructiveHint` and `idempotentHint` meaning only when `readOnlyHint` is
-		// false. Present-but-safe-looking values here would read as a judgement that was never made.
+	it("marks both listings read-only and not destructive, in so many words", async () => {
+		// The spec gives `destructiveHint` meaning only when `readOnlyHint` is false, but OpenAI's plugin
+		// review refuses a tool that leaves it unset (`annotations_required`). `idempotentHint` no
+		// directory asks for, so it stays off.
 		const hints = await annotations();
 
 		for (const name of ["list_sites", "list_folders"]) {
 			expect(hints[name]?.readOnlyHint, name).toBe(true);
-			expect(hints[name], name).not.toHaveProperty("destructiveHint");
+			expect(hints[name]?.destructiveHint, name).toBe(false);
 			expect(hints[name], name).not.toHaveProperty("idempotentHint");
 		}
 	});
@@ -358,6 +359,7 @@ describe("what each tool admits it does", () => {
 
 		for (const [name, hint] of Object.entries(hints)) {
 			expect(hint.readOnlyHint, name).toBeTypeOf("boolean");
+			expect(hint.destructiveHint, name).toBeTypeOf("boolean");
 			expect(hint.openWorldHint, name).toBeTypeOf("boolean");
 		}
 	});
@@ -526,6 +528,22 @@ describe("the tools that manage an existing site", () => {
 			subdomainChangesLeft: 1,
 			formerSubdomains: ["calm-cedar"],
 		});
+	});
+
+	it("answers a deletion with the subdomain alone, not the id of a site that is gone", async () => {
+		// Nothing can take the id of a deleted site, and OpenAI's review counts an identifier no tool
+		// consumes as data the answer did not need.
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+
+		const result = await (await connect()).callTool({
+			name: "delete_site",
+			arguments: { site: "calm-cedar", confirm: "calm-cedar" },
+		});
+
+		expect(result.isError).toBeFalsy();
+		expect(seen).toContain("DELETE /api/sites/01J");
+		expect(result.structuredContent).toEqual({ subdomain: "calm-cedar" });
 	});
 
 	it("requires the site on every one of them, and nothing else on most", async () => {
