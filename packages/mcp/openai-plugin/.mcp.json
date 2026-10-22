@@ -1,7 +1,17 @@
 {
 	"mcpServers": {
 		"drop2run": {
-			"url": "https://mcp.dropto.run/mcp"
+			"url": "https://mcp.dropto.run/mcp",
+			"extensions": {
+				"com.openai": {
+					"auth": {
+						"type": "oauth",
+						"client": {
+							"mode": "cimd"
+						}
+					}
+				}
+			}
 		}
 	}
 }
