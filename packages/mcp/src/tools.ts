@@ -68,7 +68,7 @@ import { z } from "zod";
  * release that bumps only the manifest fails before it is published rather than telling every client
  * the wrong version.
  */
-export const SERVER_VERSION = "1.3.0";
+export const SERVER_VERSION = "1.3.1";
 
 /**
  * How the tools below describe their own effects to a client.
@@ -1061,9 +1061,8 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 							"call rather than guessing which site was meant.",
 					),
 			},
-			// No `siteId`: nothing can take the id of a site that is gone, and a directory review counts an
-			// identifier no tool consumes as data the answer did not need.
 			outputSchema: {
+				siteId: z.string().describe("Identifier of the site that was deleted."),
 				subdomain: z.string().describe("Its subdomain, which stays reserved."),
 			},
 		},
@@ -1088,7 +1087,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 				return report(
 					`Deleted ${found.subdomain}. Its files and history are gone; the subdomain stays ` +
 						"reserved and cannot be used again.",
-					{ subdomain: found.subdomain },
+					{ siteId: found.siteId, subdomain: found.subdomain },
 				);
 			}),
 	);

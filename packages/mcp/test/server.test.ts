@@ -530,9 +530,10 @@ describe("the tools that manage an existing site", () => {
 		});
 	});
 
-	it("answers a deletion with the subdomain alone, not the id of a site that is gone", async () => {
-		// Nothing can take the id of a deleted site, and OpenAI's review counts an identifier no tool
-		// consumes as data the answer did not need.
+	it("answers a deletion with the site's id and subdomain, and nothing more", async () => {
+		// Dropping `siteId` here was tried for OpenAI's data-minimisation rule and reverted: removing an
+		// output field is a major version under RELEASING.md's semver, and the id of the site acted on is
+		// not the extraneous data that rule is about. Pinned with `toEqual` so nothing else creeps in.
 		const seen: string[] = [];
 		vi.stubGlobal("fetch", stubApi(seen));
 
@@ -543,7 +544,7 @@ describe("the tools that manage an existing site", () => {
 
 		expect(result.isError).toBeFalsy();
 		expect(seen).toContain("DELETE /api/sites/01J");
-		expect(result.structuredContent).toEqual({ subdomain: "calm-cedar" });
+		expect(result.structuredContent).toEqual({ siteId: "01J", subdomain: "calm-cedar" });
 	});
 
 	it("requires the site on every one of them, and nothing else on most", async () => {
