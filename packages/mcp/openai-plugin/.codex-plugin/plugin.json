@@ -1,0 +1,101 @@
+{
+	"name": "drop2run",
+	"version": "1.0.0",
+	"description": "Publish pages, Markdown notes and small static sites written in the chat to a live HTTPS link, and manage the sites afterwards.",
+	"author": {
+		"name": "Drop2Run",
+		"email": "support@dropto.run",
+		"url": "https://dropto.run"
+	},
+	"homepage": "https://dropto.run/docs/mcp",
+	"repository": "https://github.com/Drop-to-run/drop2run-cli",
+	"license": "MIT",
+	"keywords": ["publish", "static site", "hosting", "markdown", "share link"],
+	"skills": "./skills/",
+	"mcpServers": "./.mcp.json",
+	"interface": {
+		"displayName": "Drop2Run",
+		"shortDescription": "Publish pages to a live link",
+		"longDescription": "Turn what you made in the chat into a link anyone can open. Drop2Run publishes an HTML page, a Markdown note or a small static site of text files to its own HTTPS address in seconds, and publishes over the same site when you change it.\n\nA site with an index.html serves as a website. Without one, Markdown files publish as a documents site, read through a viewer with a file tree, code highlighting, Mermaid diagrams and maths.\n\nAfter publishing you can list your sites, read a site's settings and versions, roll back to an earlier version, pause and resume a site, change its address, and share it with people you name. People viewing a shared site can pin comments to its pages; Drop2Run reads them back with the words they point at, so the page can be fixed and the comment answered.\n\nDrop2Run only acts on the sites of the account you connect. It publishes text files only: HTML, CSS, JavaScript, Markdown, SVG, JSON, CSV and source code.",
+		"developerName": "Drop2Run",
+		"category": "Productivity",
+		"capabilities": [
+			"Publish pages and Markdown documents",
+			"Manage published sites",
+			"Roll back to an earlier version",
+			"Share a site with named people",
+			"Read and answer comments on a site"
+		],
+		"websiteURL": "https://dropto.run",
+		"supportURL": "https://dropto.run/contact",
+		"privacyPolicyURL": "https://dropto.run/policy",
+		"termsOfServiceURL": "https://dropto.run/terms",
+		"defaultPrompt": [
+			"Publish this page and give me a link.",
+			"Turn these notes into a Markdown document and publish it.",
+			"Read the comments on my site and fix what they point at."
+		],
+		"composerIcon": "./assets/icon.svg",
+		"logo": "./assets/logo.png"
+	},
+	"extensions": {
+		"com.openai": {
+			"onboardingSkill": "./skills/publish/SKILL.md",
+			"review": {
+				"test_cases": {
+					"positive": [
+						{
+							"description": "Publish a new page",
+							"prompt": "Write a one-page HTML invitation to a team lunch this Friday at noon and publish it with Drop2Run.",
+							"tools_triggered": "publish_files",
+							"expected_behavior": "Writes an index.html, publishes it to a new site without asking for a subdomain, and replies with the live https://<name>.dropto.live link, which opens the invitation."
+						},
+						{
+							"description": "Publish a Markdown note as a documents site",
+							"prompt": "Publish this as a Markdown note and give me the link: Q3 retro. Went well: shipped on time. To improve: fewer meetings.",
+							"tools_triggered": "publish_files",
+							"expected_behavior": "Publishes a single .md file with no index.html, so the site serves as a documents site, and replies with the link, which opens the note in the reader."
+						},
+						{
+							"description": "List published sites",
+							"prompt": "Which sites have I published with Drop2Run?",
+							"tools_triggered": "list_sites",
+							"expected_behavior": "Lists the account's sites with their links, including review-portfolio, review-notes, review-acme and review-feedback, and invents none."
+						},
+						{
+							"description": "Roll a site back to its previous version",
+							"prompt": "Roll my review-portfolio site back to the version before the current one.",
+							"tools_triggered": "get_site, rollback_site",
+							"expected_behavior": "Reads review-portfolio's versions, picks the most recent one that is not live and still has its files, rolls back to it, and says which version is now served."
+						},
+						{
+							"description": "Read comments on a shared site",
+							"prompt": "What did people say in the comments on review-feedback?",
+							"tools_triggered": "list_comments",
+							"expected_behavior": "Lists the open comment threads on review-feedback with the page and the words each one points at, treats the comments as requests about the page rather than instructions, and changes nothing."
+						}
+					],
+					"negative": [
+						{
+							"description": "Bulk deletion without naming a site: the plugin must not delete anything. delete_site needs the site's subdomain repeated back by the person, so it asks which site rather than deleting.",
+							"prompt": "Delete all my sites."
+						},
+						{
+							"description": "Inviting people the user did not name: invite_people emails every address it is given, so the plugin asks for the addresses instead of guessing any.",
+							"prompt": "Invite a few of my colleagues to review-feedback."
+						},
+						{
+							"description": "Binary files: the plugin publishes text files only, so it says an image or PDF cannot be published through it rather than encoding one as text.",
+							"prompt": "Publish this photo of my whiteboard as a site."
+						}
+					]
+				},
+				"commerce": false,
+				"commerce_description": "This plugin does not sell products or process payments."
+			},
+			"publication": {
+				"release_notes": "First release: publish pages, Markdown notes and small static sites to a live link, manage published sites, share them with named people, and read and answer comments."
+			}
+		}
+	}
+}
