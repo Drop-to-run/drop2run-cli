@@ -202,6 +202,41 @@ describe("the remote server over HTTP", () => {
 		expect(body.result.serverInfo.name).toBe("drop2run");
 	});
 
+	it("logs why the transport refused a request, with the protocol version the client sent", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const request = rpc("tools/list");
+		request.headers.set("mcp-protocol-version", "2099-01-01");
+
+		const { response } = await serveRemote(request, TOKEN, () => "unused");
+
+		expect(response.status).toBe(400);
+		expect(warn).toHaveBeenCalledWith(
+			"mcp: transport rejected a request",
+			expect.objectContaining({
+				reason: expect.stringContaining("Unsupported protocol version: 2099-01-01"),
+				protocolVersion: "2099-01-01",
+			}),
+		);
+		warn.mockRestore();
+	});
+
+	it("logs nothing for a request it answers", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+		await serveRemote(
+			rpc("initialize", {
+				protocolVersion: "2025-11-25",
+				capabilities: {},
+				clientInfo: { name: "test", version: "0" },
+			}),
+			TOKEN,
+			() => "unused",
+		);
+
+		expect(warn).not.toHaveBeenCalled();
+		warn.mockRestore();
+	});
+
 	it("says the token was refused when the API answers 401, so the Worker can answer 401 too", async () => {
 		apiAnswers(401, { type: "invalid_token", detail: "This access token is not valid." });
 

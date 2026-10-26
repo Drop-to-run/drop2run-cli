@@ -51,6 +51,19 @@ export async function serveRemote(
 	// No `sessionIdGenerator`: leaving it out is what makes the transport stateless.
 	const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
 
+	// The transport answers a request it will not take — a protocol version it does not know, a body that is
+	// not JSON-RPC — with a 400 whose reason goes nowhere else: Workers Logs records the status and two
+	// headers, never the body or `mcp-protocol-version`. Claude.ai's first request on reconnecting met such
+	// a 400 four times on 25-26/10/2026 and nothing recorded why. Set before connect, which chains it rather
+	// than replacing it. The body stays out: it carries the arguments of a person's tool call.
+	transport.onerror = (error) => {
+		console.warn("mcp: transport rejected a request", {
+			reason: error.message,
+			protocolVersion: request.headers.get("mcp-protocol-version"),
+			userAgent: request.headers.get("user-agent"),
+		});
+	};
+
 	await server.connect(transport);
 
 	try {
