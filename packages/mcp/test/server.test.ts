@@ -1217,6 +1217,18 @@ describe("update_site's upstream", () => {
 				upstreams.splice(0);
 				return new Response(null, { status: 204 });
 			}
+			if (url.pathname.startsWith("/api/sites/01J/env/") && method === "PUT") {
+				const value = (JSON.parse(String(init?.body)) as { value: string }).value;
+				return Response.json({
+					name: url.pathname.split("/").at(-1),
+					last4: value.slice(-4),
+					createdAt: "2026-11-02T00:00:00Z",
+					updatedAt: "2026-11-02T00:00:00Z",
+				});
+			}
+			if (url.pathname.startsWith("/api/sites/01J/env/") && method === "DELETE") {
+				return new Response(null, { status: 204 });
+			}
 			if (url.pathname === "/api/sites/01J/viewers") return Response.json({ invitedOnly: false });
 			if (url.pathname === "/api/sites/01J") {
 				return Response.json({
@@ -1247,6 +1259,42 @@ describe("update_site's upstream", () => {
 			throw new Error(`Unexpected request to ${method} ${url.pathname}`);
 		});
 	}
+
+	it("sets and removes the functions' variables on their own, and never echoes a value", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+
+		const result = await (await connect()).callTool({
+			name: "update_site",
+			arguments: {
+				site: "calm-cedar",
+				env: { set: [{ name: "OPENAI_API_KEY", value: "sk-secret-Wq9z\n" }], remove: ["OLD_KEY"] },
+			},
+		});
+
+		expect(result.isError).toBeFalsy();
+		const text = JSON.stringify(result.content);
+		expect(text).toContain("OPENAI_API_KEY ••••Wq9z set");
+		expect(text).toContain("OLD_KEY removed");
+		expect(text).not.toContain("sk-secret");
+		// Trimmed on the way, for the newline a pasted key carries.
+		expect(seen).toContain('PUT /api/sites/01J/env/OPENAI_API_KEY {"value":"sk-secret-Wq9z"}');
+		expect(seen).toContain("DELETE /api/sites/01J/env/OLD_KEY");
+		expect(seen.some((call) => call.startsWith("PATCH /api/sites/01J "))).toBe(false);
+	});
+
+	it("refuses a variable name that cannot be one before sending anything", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal("fetch", stubApi(seen));
+
+		const result = await (await connect()).callTool({
+			name: "update_site",
+			arguments: { site: "calm-cedar", env: { set: [{ name: "openai-key", value: "x" }] } },
+		});
+
+		expect(result.isError).toBe(true);
+		expect(seen.some((call) => call.includes("/env/"))).toBe(false);
+	});
 
 	it("adds an upstream on its own, without touching the settings, and never echoes a value", async () => {
 		const seen: string[] = [];

@@ -11,8 +11,9 @@ import { defineConfig } from "vite";
  * the alias into an implementation detail of the build rather than a promise the published package
  * cannot keep.
  *
- * This package has no runtime dependencies at all — the argument parser is a function, deliberately, in
- * a package people install globally and hand a credential to.
+ * This package has one runtime dependency, esbuild, to bundle a site's `_functions/` (FUNCTIONS-BRIEF D6,
+ * approved 02/11/2026) — otherwise none: the argument parser is a function, deliberately, in a package
+ * people install globally and hand a credential to.
  *
  * `vite` rather than a bundler of its own: it is already the pinned build tool in this repository, and
  * `apps/web` already uses its SSR mode for the prerenderer, and packages/mcp is built the same way.
@@ -39,6 +40,9 @@ export default defineConfig({
 				// Every node built-in, in both spellings. Left to a regex rather than a list because a
 				// missing entry is a build that inlines a stub of `fs` and fails at runtime.
 				/^node:/,
+				// The one runtime dependency (FUNCTIONS-BRIEF D6): a native binary per platform, so it is
+				// installed beside the CLI rather than folded into it, and loaded only to bundle `_functions/`.
+				"esbuild",
 			],
 		},
 	},

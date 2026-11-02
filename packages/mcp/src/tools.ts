@@ -20,7 +20,9 @@ import {
 	type PublishResult,
 	promoteDeploy,
 	publishFiles,
+	readEnv,
 	readUpstreams,
+	removeEnvVar,
 	removePerson,
 	removeUpstream,
 	replyToComment,
@@ -31,6 +33,7 @@ import {
 	type SiteUpstreams,
 	servingModeOf,
 	setCommentResolved,
+	setEnvVar,
 	setSitePaused,
 	setUpstream,
 	updateSiteSettings,
@@ -415,6 +418,72 @@ const UPSTREAM_INPUT = z
 	);
 
 /**
+ * `env` on `update_site`: variables the site's functions read as `env.NAME` (docs/briefs/FUNCTIONS-BRIEF.md D17,
+ * §4.6).
+ *
+ * The description carries what `UPSTREAM_INPUT`'s does for the same reason — a value can never be read back, so
+ * it must come from the person — plus the two facts about functions an agent cannot guess: where the code goes,
+ * and that a change needs no new publish.
+ */
+const ENV_INPUT = z
+	.object({
+		set: z
+			.array(
+				z.object({
+					name: z
+						.string()
+						.regex(/^[A-Z_][A-Z0-9_]{0,63}$/)
+						.describe("Uppercase letters, digits and underscores, such as OPENAI_API_KEY."),
+					value: z.string().min(1),
+				}),
+			)
+			.optional()
+			.describe(
+				"Variables to add, or to replace by name. A value is encrypted on arrival and can never be read " +
+					"back — only its last four characters are shown — so take it from the person, never invent one.",
+			),
+		remove: z.array(z.string().min(1)).optional().describe("Names of variables to delete."),
+	})
+	.optional()
+	.describe(
+		"Keys and settings for the site's functions: each .js file under _functions/ in what is published " +
+			"answers the path it is named after (_functions/api/hello.js answers /api/hello) and reads these " +
+			"as env.NAME. A change reaches every route within about a minute, without publishing again. " +
+			"Anybody who can open a public site can call its functions. Plans without functions refuse a set; " +
+			"a remove always works.",
+	);
+
+/**
+ * Applies an `env` change and describes it: sets first, then removals, each by name with the last four
+ * characters of its value — never the value.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId The site.
+ * @param input What `update_site` was given.
+ * @returns Lines for the tool's text answer.
+ */
+async function applyEnv(
+	credentials: Credentials,
+	siteId: string,
+	input: NonNullable<z.infer<typeof ENV_INPUT>>,
+): Promise<string[]> {
+	const lines: string[] = [];
+
+	for (const { name, value } of input.set ?? []) {
+		const variable = await setEnvVar(credentials, siteId, name, value.trim());
+		lines.push(
+			`  env       ${variable.name} ••••${variable.last4} set; functions read it as env.${variable.name}.`,
+		);
+	}
+	for (const name of input.remove ?? []) {
+		await removeEnvVar(credentials, siteId, name);
+		lines.push(`  env       ${name} removed.`);
+	}
+
+	return lines;
+}
+
+/**
  * Applies an `upstream` change and describes it.
  *
  * @param credentials Token and base URL.
@@ -778,6 +847,11 @@ export function describe(result: PublishResult): string {
 		"",
 		...(mode === null ? [] : [mode, ""]),
 		...(edge === null ? [] : [edge, ""]),
+		// The server's own sentences about a publish it accepted — today that _functions/ was left out (FUNCTIONS-
+		// BRIEF D23), which an agent would otherwise report as working functions.
+		...(result.warnings.length === 0
+			? []
+			: [...result.warnings.map((warning) => `Warning: ${warning}.`), ""]),
 		// The minute only when the edge has the version: beside the pending line it would contradict it.
 		`Site ${result.subdomain} (${result.siteId}).${edge === null ? " Reaching every edge takes up to about a minute." : ""}`,
 	].join("\n");
@@ -1289,13 +1363,14 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 		({ site }) =>
 			withCredentials(context, async (credentials) => {
 				const found = await findSite(credentials, site);
-				const [detail, api] = await Promise.all([
+				const [detail, api, env] = await Promise.all([
 					getSite(credentials, found.siteId),
 					readUpstreams(credentials, found.siteId),
+					readEnv(credentials, found.siteId),
 				]);
 
 				return report(
-					describeSite(detail, await folderPathOf(credentials, detail.folderId), api),
+					describeSite(detail, await folderPathOf(credentials, detail.folderId), api, env),
 					structuredSite(detail, api),
 				);
 			}),
@@ -1383,6 +1458,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 							"the person said it. Ask for it rather than filling it in.",
 					),
 				upstream: UPSTREAM_INPUT,
+				env: ENV_INPUT,
 			},
 			outputSchema: SETTINGS_OUTPUT,
 		},
@@ -1399,6 +1475,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 			comments,
 			confirm,
 			upstream,
+			env,
 		}) =>
 			withCredentials(context, async (credentials) => {
 				const found = await findSite(credentials, site);
@@ -1428,6 +1505,9 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 				// change that only names an upstream must not be refused as "nothing to change".
 				const upstreamLines =
 					upstream === undefined ? [] : await applyUpstream(credentials, found.siteId, upstream);
+				// The functions' variables likewise: their own records, and a change that names only them is a change.
+				const envLines = env === undefined ? [] : await applyEnv(credentials, found.siteId, env);
+				upstreamLines.push(...envLines);
 				const settingsAsked = [
 					name,
 					mode,
@@ -1441,7 +1521,9 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 				].some((value) => value !== undefined);
 
 				if (!settingsAsked) {
-					if (upstream === undefined) throw new Error("Nothing to change — name a setting.");
+					if (upstream === undefined && env === undefined) {
+						throw new Error("Nothing to change — name a setting.");
+					}
 
 					const detail = await getSite(credentials, found.siteId);
 					const current = structuredSite(detail);
@@ -1482,7 +1564,7 @@ export function registerSiteTools(server: McpServer, context: ToolContext): void
 					if (upstreamLines.length === 0) throw failure;
 					const reason = failure instanceof Error ? failure.message : String(failure);
 					throw new Error(
-						`${upstreamLines.join("\n")}\nThat upstream change was saved, but the settings were not: ${reason}`,
+						`${upstreamLines.join("\n")}\n${upstream === undefined ? "Those variables were" : "That change was"} saved, but the settings were not: ${reason}`,
 					);
 				}
 				const lines = [

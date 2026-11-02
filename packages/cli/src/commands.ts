@@ -37,8 +37,10 @@ import {
 	pollDevice,
 	promoteDeploy,
 	publishDirectory,
+	readEnv,
 	readProject,
 	readUpstreams,
+	removeEnvVar,
 	removePerson,
 	removeUpstream,
 	replyToComment,
@@ -51,6 +53,7 @@ import {
 	saveToken,
 	servingModeOf,
 	setCommentResolved,
+	setEnvVar,
 	setSitePaused,
 	setUpstream,
 	startDevice,
@@ -60,6 +63,7 @@ import {
 	waitForCallback,
 	writeProject,
 } from "@drop2run/node";
+import { type Bundler, esbuildBundler, withBundledFunctions } from "./functions.js";
 import { type ProgressWriter, silentProgress } from "./progress.js";
 import { readSecret } from "./secret.js";
 
@@ -458,7 +462,15 @@ export async function folders(): Promise<CommandResult> {
  * @param directory Folder to publish, or undefined to use the project file and then the working directory.
  * @param site Subdomain or site id to publish over, or undefined to use the project file.
  * @param report Receives progress, injectable so a test does not print and `--json` can suppress it.
+ * <b>`_functions/` is bundled</b> (FUNCTIONS-BRIEF D6): each route goes up as one module with what it imports,
+ * npm packages included, because the platform has no build step to resolve them. `--no-bundle` turns it off.
+ *
+ * @param directory Folder to publish, or undefined to use the project file and then the working directory.
+ * @param site Subdomain or site id to publish over, or undefined to use the project file.
+ * @param report Receives progress, injectable so a test does not print and `--json` can suppress it.
  * @param newSite Name and folder for a new site. A subdomain here means a new site is wanted.
+ * @param bundle Whether to bundle `_functions/`; false publishes it as it is.
+ * @param bundler What bundles it; a test passes its own rather than running esbuild.
  * @returns The result.
  */
 export async function deployCommand(
@@ -466,6 +478,8 @@ export async function deployCommand(
 	site?: string,
 	report: ProgressWriter = silentProgress,
 	newSite: NewSite = {},
+	bundle = true,
+	bundler: Bundler = esbuildBundler,
 ): Promise<CommandResult> {
 	const found = credentialsOr();
 	if ("result" in found) return found.result;
@@ -495,6 +509,7 @@ export async function deployCommand(
 			target,
 			report,
 			newSite,
+			bundle ? (source, root) => withBundledFunctions(source, root, bundler) : undefined,
 		);
 		const what = result.unchanged
 			? "Already up to date — nothing needed publishing."
@@ -503,9 +518,12 @@ export async function deployCommand(
 		// the output has always found it.
 		const mode = describeMode(result);
 		const edge = describeEdge(result);
+		// The server's own sentences, after everything else: a _functions/ folder left out (D23) is the reason a
+		// route then answers 404, and this line is the only place a terminal user learns it.
+		const warnings = result.warnings.map((warning) => `Warning: ${warning}.`).join("\n");
 
 		return {
-			text: `${what}\n${result.url}${mode === null ? "" : `\n${mode}`}${edge === null ? "" : `\n${edge}`}`,
+			text: `${what}\n${result.url}${mode === null ? "" : `\n${mode}`}${edge === null ? "" : `\n${edge}`}${warnings === "" ? "" : `\n${warnings}`}`,
 			json: result,
 			code: 0,
 		};
@@ -758,9 +776,10 @@ export async function info(site: string | undefined): Promise<CommandResult> {
 
 	try {
 		const summary = await findSite(found.credentials, target.named);
-		const [detail, api] = await Promise.all([
+		const [detail, api, env] = await Promise.all([
 			getSite(found.credentials, summary.siteId),
 			readUpstreams(found.credentials, summary.siteId),
+			readEnv(found.credentials, summary.siteId),
 		]);
 		const folderPath =
 			detail.folderId === null
@@ -770,13 +789,14 @@ export async function info(site: string | undefined): Promise<CommandResult> {
 					)?.path;
 
 		return {
-			text: describeSite(detail, folderPath, api),
-			// `apiProxy` is null where the proxy is not switched on or could not be read.
+			text: describeSite(detail, folderPath, api, env),
+			// `apiProxy` and `functions` are null where that feature is not switched on or could not be read.
 			json: {
 				...detail,
 				mode: servingModeOf(detail),
 				folderPath: folderPath ?? null,
 				apiProxy: api,
+				functions: env,
 			},
 			code: 0,
 		};
@@ -839,6 +859,8 @@ const SETTINGS_USAGE = [
 	"  subdomain <name>            Its address; needs --yes, the old one keeps redirecting",
 	"  upstream <origin> [header]  An API its /api/* routes may call; the header's value is",
 	"                              typed at a hidden prompt or piped in; --methods GET,POST",
+	"  env <NAME>                  A variable its functions read as env.NAME; the value is",
+	"                              typed at a hidden prompt or piped in",
 ].join("\n");
 
 /**
@@ -861,7 +883,11 @@ type ParsedSetting =
 	| { readonly password: true }
 	| { readonly subdomain: string }
 	| { readonly upstream: { readonly origin: string; readonly header?: string } }
+	| { readonly env: string }
 	| { readonly refusal: string };
+
+/** What a function variable's name may be: the server's rule (FUNCTIONS-BRIEF D17), checked here to answer sooner. */
+const ENV_NAME = /^[A-Z_][A-Z0-9_]{0,63}$/;
 
 /**
  * Turns `set <setting> <value>` into a settings change, or says why it cannot.
@@ -905,6 +931,26 @@ function settingChange(
 			};
 		}
 		return { upstream: { origin: values[0], ...(values[1] ? { header: values[1] } : {}) } };
+	}
+
+	if (setting === "env") {
+		// A name and never its value, for the reason `password` refuses one: shell history keeps arguments.
+		if (values[0] === undefined) return needs("OPENAI_API_KEY");
+		if (values.length > 1) {
+			return {
+				refusal:
+					"`set env` takes a name; its value is typed at a hidden prompt or piped in, so it stays out of " +
+					'your shell history: `printf %s "$KEY" | drop2run set env OPENAI_API_KEY`.',
+			};
+		}
+		if (!ENV_NAME.test(values[0])) {
+			return {
+				refusal:
+					`"${values[0]}" cannot be a variable's name: uppercase letters, digits and underscores, ` +
+					"starting with a letter or underscore — OPENAI_API_KEY, say.",
+			};
+		}
+		return { env: values[0] };
 	}
 
 	if (setting !== "name" && setting !== "password" && values.length > 1) {
@@ -1036,6 +1082,27 @@ export async function set(
 			);
 
 			return upstreamResult(summary.subdomain, upstream, created ? "added" : "updated");
+		}
+
+		if ("env" in parsed) {
+			// Asked for only once the site is known to exist, like the password. Trimmed, because a key piped
+			// from `echo` or copied from a provider's page carries a newline into every header built from it.
+			const value = (await readPassword(`Value for ${parsed.env}: `)).trim();
+			if (value === "") {
+				return failure(
+					`No value was given for ${parsed.env}. To remove it, run \`drop2run unset env ${parsed.env}\`.`,
+				);
+			}
+
+			const variable = await setEnvVar(found.credentials, summary.siteId, parsed.env, value);
+
+			return {
+				text:
+					`Set ${variable.name} ••••${variable.last4} on ${summary.subdomain}. ` +
+					`Functions read it as env.${variable.name} within about a minute, without publishing again.`,
+				json: variable,
+				code: 0,
+			};
 		}
 
 		if ("subdomain" in parsed) {
@@ -1180,6 +1247,7 @@ export async function unset(
 	extra: readonly string[] = [],
 ): Promise<CommandResult> {
 	if (setting === "upstream") return await unsetUpstream(site, extra);
+	if (setting === "env") return await unsetEnv(site, extra);
 
 	// Refused for the reason `set` refuses a second value: `unset password other-site` would otherwise
 	// make the site in drop2run.json public.
@@ -1216,6 +1284,43 @@ export async function unset(
 		const summary = await findSite(found.credentials, target.named);
 
 		return await applied(found.credentials, summary.siteId, summary.subdomain, change);
+	} catch (error) {
+		return failureFrom(error);
+	}
+}
+
+/**
+ * Removes a variable the site's functions read, sealed value and all. Works whatever the plan, so a secret can
+ * always be taken back.
+ *
+ * @param site Subdomain or site id, or undefined to use the project file.
+ * @param values The name, alone.
+ * @returns The result.
+ */
+async function unsetEnv(
+	site: string | undefined,
+	values: readonly string[],
+): Promise<CommandResult> {
+	const [name, ...extra] = values;
+	if (name === undefined || extra.length > 0) {
+		return failure("`unset env` takes one variable's name: `drop2run unset env OPENAI_API_KEY`.");
+	}
+
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	const target = siteOr(site, `drop2run unset env ${name} --site <subdomain>`);
+	if ("result" in target) return target.result;
+
+	try {
+		const summary = await findSite(found.credentials, target.named);
+		await removeEnvVar(found.credentials, summary.siteId, name);
+
+		return {
+			text: `Removed ${name} from ${summary.subdomain}. Functions stop seeing it within about a minute.`,
+			json: { removed: name },
+			code: 0,
+		};
 	} catch (error) {
 		return failureFrom(error);
 	}

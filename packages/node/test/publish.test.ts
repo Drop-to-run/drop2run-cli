@@ -120,6 +120,10 @@ function stubApi(sites: unknown[] = [], folders: unknown[] = []): Recorded[] {
 						sha256: file.sha256,
 					})),
 					uploadUrl: "https://storage.test/v1/object",
+					// What the server says of _functions/ on a site that may not run functions (FUNCTIONS-BRIEF D23).
+					...(files.some((file) => file.path.startsWith("_functions/"))
+						? { warnings: ["functions not enabled for this site"] }
+						: {}),
 				});
 			}
 
@@ -175,6 +179,24 @@ describe("publishing with no site named", () => {
 	});
 });
 
+describe("passing on what the server warned about", () => {
+	it("carries the prepare answer's warnings to the result, and nothing when there are none", async () => {
+		stubApi();
+
+		const plain = await publishFiles(credentials, [page]);
+		const withFunctions = await publishFiles(credentials, [
+			page,
+			{
+				path: "_functions/api/hello.js",
+				content: "export const onRequest = () => new Response('hi');",
+			},
+		]);
+
+		expect(plain.warnings).toEqual([]);
+		expect(withFunctions.warnings).toEqual(["functions not enabled for this site"]);
+	});
+});
+
 describe("saying how a published site is served", () => {
 	it("reports the mode the server gave it", async () => {
 		stubApi();
@@ -212,6 +234,7 @@ describe("saying how a published site is served", () => {
 				mode: null,
 				nestedIndex: null,
 				edgePending: false,
+				warnings: [],
 			}),
 		).toBeNull();
 	});

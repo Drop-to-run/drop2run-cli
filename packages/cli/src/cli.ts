@@ -55,6 +55,7 @@ const HELP = `drop2run — publish a static site from the command line
   drop2run set <setting> <value> [--site X]    Change one setting (see Settings below)
   drop2run unset name|password|expires         Clear a name, a password or a takedown
   drop2run unset upstream <origin> [header]    Remove an upstream and its keys, or one header
+  drop2run unset env <NAME>                    Remove a variable your functions read
   drop2run pause [site]                        Take a site off the air, keeping its files
   drop2run resume [site]                       Put a paused site back on the air
   drop2run rollback <deployId> [--site X]      Put an earlier version back live
@@ -86,6 +87,15 @@ Flags
   --role X       What invited people may do: view (the default) or comment
   --methods X    What visitors may send to an upstream, such as GET,POST;
                  GET only when a new one leaves it out (\`set upstream\` only)
+  --no-bundle    Publish _functions/ as it is instead of bundling each route
+                 with its imports (\`deploy\` only)
+
+Functions
+  Each .js or .ts file under _functions/ answers the path it is named after:
+  _functions/api/hello.js answers /api/hello. \`deploy\` bundles each one with
+  what it imports, npm packages included, so run \`npm install\` first. A
+  file or folder starting with _ is a helper, not a route. Give functions
+  their keys with \`set env\`; they read them as env.NAME.
 
 Comments
   \`comments reply\`, \`resolve\` and \`reopen\` act on --site, else the site in
@@ -115,6 +125,10 @@ Settings
                                 piped in, encrypted, and never shown again.
                                 Point a _redirects line at it:
                                 /api/* https://api.example.com/:splat 200
+  set env <NAME>                A variable the site's functions read as
+                                env.NAME; the value is typed at a hidden
+                                prompt or piped in, encrypted, and never
+                                shown again
 
   \`set\` and \`unset\` act on --site, else the site in drop2run.json. A
   setting your plan does not include is refused with the reason, and
@@ -373,6 +387,7 @@ export async function run(commandLine: readonly string[]): Promise<CommandResult
 		},
 		flagValue(argv, "--role"),
 		methods,
+		!argv.includes("--no-bundle"),
 	);
 
 	return json ? { ...result, text: JSON.stringify(result.json, null, 2) } : result;
@@ -394,6 +409,7 @@ export async function run(commandLine: readonly string[]): Promise<CommandResult
  * @param commentOptions `--status`, `--path` and `--resolve`, which only `comments` reads.
  * @param role Value of `--role`, which only `invite` reads.
  * @param methods Value of `--methods`, which only `set upstream` reads.
+ * @param bundle False when `--no-bundle` was given, which only `deploy` reads.
  * @returns The command's result.
  */
 async function dispatch(
@@ -408,6 +424,7 @@ async function dispatch(
 	commentOptions: CommentOptions = {},
 	role: string | undefined = undefined,
 	methods: string | undefined = undefined,
+	bundle = true,
 ): Promise<CommandResult> {
 	switch (command) {
 		case "login": {
@@ -437,7 +454,7 @@ async function dispatch(
 
 			// Undefined rather than "." so `deployCommand` can tell "no folder given" from "this folder",
 			// which is what lets drop2run.json supply one.
-			return await deployCommand(rest[0], site, report, newSite);
+			return await deployCommand(rest[0], site, report, newSite, bundle);
 		}
 		case "ls":
 		case "list":

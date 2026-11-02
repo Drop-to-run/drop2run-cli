@@ -49,6 +49,12 @@ export interface PublishResult {
 	 * or the account's API budget is spent. It gets there on its own; publishing again is not needed.
 	 */
 	readonly edgePending: boolean;
+	/**
+	 * What the server said about a publish it accepted, as sentences to show as they are — today only that
+	 * `_functions/` was left out because the site may not run functions (docs/briefs/FUNCTIONS-BRIEF.md D23).
+	 * Empty when there is nothing to say.
+	 */
+	readonly warnings: readonly string[];
 }
 
 /**
@@ -240,6 +246,7 @@ export async function publish(
 	let unchanged = false;
 	let mode: ServingMode | null = null;
 	let edgePending = false;
+	let warnings: readonly string[] = [];
 	let paths: readonly string[] = [];
 	let failure: string | null = null;
 	let failureCode: string | undefined;
@@ -253,11 +260,13 @@ export async function publish(
 		if (event.type === "unchanged") {
 			unchanged = true;
 			url = event.url || target.url;
+			warnings = event.warnings ?? [];
 		}
 		if (event.type === "done") {
 			url = event.url;
 			mode = event.mode;
 			edgePending = event.edgePending;
+			warnings = event.warnings ?? [];
 		}
 		if (event.type === "error") {
 			failure = event.message;
@@ -311,6 +320,7 @@ export async function publish(
 		mode,
 		nestedIndex: mode === "docs" ? nestedIndexOf(paths) : null,
 		edgePending,
+		warnings,
 	};
 }
 
