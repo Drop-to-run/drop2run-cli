@@ -62,7 +62,9 @@ export type ProgressEvent =
 	 * not the title the drop offered, since a redeploy leaves an existing name alone. `mode` is how the
 	 * site is now served and `modeIsManual` whether its owner chose that, both as the server reports them.
 	 * `edgePending` is true when the version is live but has not reached the edge yet; it gets there on
-	 * its own, usually within minutes, so it is said rather than treated as a failure.
+	 * its own, usually within minutes, so it is said rather than treated as a failure. `warnings`, present only
+	 * when there are some, are the server's sentences about a drop it accepted — today that `_functions/` was
+	 * left out because the site may not run functions (docs/briefs/FUNCTIONS-BRIEF.md D23).
 	 */
 	| {
 			type: "done";
@@ -71,12 +73,14 @@ export type ProgressEvent =
 			mode: ServingMode;
 			modeIsManual: boolean;
 			edgePending: boolean;
+			warnings?: readonly string[];
 	  }
 	/**
 	 * The dropped folder is byte-for-byte what the site already serves, so no version was published.
-	 * A success, not a failure — but a different one from `done`, because nothing changed.
+	 * A success, not a failure — but a different one from `done`, because nothing changed. `warnings` as on
+	 * `done`.
 	 */
-	| { type: "unchanged"; url: string }
+	| { type: "unchanged"; url: string; warnings?: readonly string[] }
 	/**
 	 * Failed. `detail` is the RFC 9457 body when the API refused, and `deployId` the version this run
 	 * created — present only for a failure after the server answered `prepare`, since before that there

@@ -71,6 +71,12 @@ export interface PrepareResponse {
 	 * keeps its default.
 	 */
 	readonly batchConcurrency?: number | null;
+	/**
+	 * Things about this deploy the caller should be told although it was accepted, or null when there are none —
+	 * today only that `_functions/` was left out because the site may not run functions
+	 * (docs/briefs/FUNCTIONS-BRIEF.md D23). Sentences to show as they are, not codes to branch on.
+	 */
+	readonly warnings?: readonly string[] | null;
 }
 
 /** Response of `POST /sites/{siteId}/deploys/{deployId}/complete`. */

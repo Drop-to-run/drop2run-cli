@@ -119,8 +119,16 @@ export async function deploy(
 		// there is nothing to upload and nothing to complete. Checked before any other use of the
 		// response: `deployId` here is the version already live, and completing that would rewrite the
 		// mapping to where it already points.
+		// What the server said about a drop it accepted; carried to the end so it is shown with the result rather
+		// than lost between stages.
+		const warnings = prepared.warnings ?? [];
+
 		if (prepared.unchanged) {
-			onProgress({ type: "unchanged", url: prepared.url ?? "" });
+			onProgress({
+				type: "unchanged",
+				url: prepared.url ?? "",
+				...(warnings.length > 0 ? { warnings } : {}),
+			});
 			return;
 		}
 
@@ -209,6 +217,7 @@ export async function deploy(
 			mode: servingModeOf(completed),
 			modeIsManual: completed.modeIsManual,
 			edgePending: completed.edge === "pending",
+			...(warnings.length > 0 ? { warnings } : {}),
 		});
 	} catch (error) {
 		const failure = asDeployError(error);
