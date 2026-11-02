@@ -22,12 +22,14 @@ export {
 	changeSubdomain,
 	createSite,
 	deleteSite,
+	type EnvVar,
 	findSite,
 	getSite,
 	type Invitation,
 	invitePeople,
 	isTokenRefused,
 	listComments,
+	listEnv,
 	listFolders,
 	listPeople,
 	listSites,
@@ -38,8 +40,10 @@ export {
 	type PromotedDeploy,
 	promoteDeploy,
 	ROOT_FOLDER,
+	readEnv,
 	readInvitedOnly,
 	readUpstreams,
+	removeEnvVar,
 	removePerson,
 	removeUpstream,
 	replyToComment,
@@ -47,6 +51,7 @@ export {
 	resolveFolderTarget,
 	type ServingMode,
 	type SiteDetail,
+	type SiteEnv,
 	type SiteFolder,
 	type SiteListing,
 	type SitePauseState,
@@ -59,6 +64,7 @@ export {
 	type SiteVersion,
 	type SubdomainChange,
 	setCommentResolved,
+	setEnvVar,
 	setSitePaused,
 	setUpstream,
 	type ThreadComment,
@@ -67,7 +73,13 @@ export {
 	updateSiteSettings,
 } from "./api.js";
 export { type Credentials, DEFAULT_API_BASE_URL, dashboardUrlFor } from "./credentials.js";
-export { accessOf, describeSite, describeUpstreams, servingModeOf } from "./describe.js";
+export {
+	accessOf,
+	describeFunctions,
+	describeSite,
+	describeUpstreams,
+	servingModeOf,
+} from "./describe.js";
 export {
 	type AuthoredFile,
 	describeEdge,

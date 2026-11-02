@@ -1,4 +1,4 @@
-import type { SiteDetail, SiteUpstreams } from "./api.js";
+import type { SiteDetail, SiteEnv, SiteUpstreams } from "./api.js";
 
 /**
  * How a site's settings read in a terminal and in a chat.
@@ -100,6 +100,47 @@ export function describeUpstreams(api: SiteUpstreams | null): string[] {
 }
 
 /**
+ * The lines about a site's functions (docs/briefs/FUNCTIONS-BRIEF.md): the account's month, each variable by
+ * name with the last four characters of its value — never the value — and the live routes with their files.
+ *
+ * Nothing when functions could not be read or are not switched on, as {@link describeUpstreams} does. A plan
+ * without functions and nothing kept reads as one line; a version whose `_functions/` was left out says so,
+ * because that is the state behind a route that answers 404.
+ *
+ * @param env What `readEnv` returned.
+ * @returns The lines.
+ */
+export function describeFunctions(env: SiteEnv | null): string[] {
+	if (env === null) return [];
+
+	const { allowance } = env;
+	const onPlan = allowance.maxSites > 0 && allowance.maxCallsPerMonth > 0;
+	const leftOut = env.sourcesLeftOut
+		? [
+				"    this version's _functions/ was left out when it was published; publish again once the site can run functions",
+			]
+		: [];
+
+	if (!onPlan && env.vars.length === 0) return ["  functions off (not on this plan)", ...leftOut];
+
+	const state = env.blocked
+		? "switched off by Drop2Run — its routes answer 404"
+		: !onPlan
+			? "not on this plan — its routes answer 404"
+			: allowance.suspended
+				? `this month's ${allowance.maxCallsPerMonth.toLocaleString("en-US")} calls are spent — functions answer 429 until ${allowance.resetsAt.slice(0, 10)}`
+				: `${allowance.callsThisMonth.toLocaleString("en-US")} of ${allowance.maxCallsPerMonth.toLocaleString("en-US")} calls this month, every site of the account`;
+
+	return [
+		`  functions ${state}`,
+		...env.vars.map((variable) => `    env ${variable.name} ••••${variable.last4}`),
+		...env.routes.map((route) => `    route ${route.pattern} ← ${route.file ?? "?"}`),
+		...(env.routes.length === 0 && !env.sourcesLeftOut ? ["    no route in the live version"] : []),
+		...leftOut,
+	];
+}
+
+/**
  * Describes a site's settings, state and recent versions as lines of text.
  *
  * A setting the plan does not include says so, because "off" alone reads as something that could be
@@ -109,12 +150,14 @@ export function describeUpstreams(api: SiteUpstreams | null): string[] {
  * @param folderPath The path of the folder it is filed in, when the caller looked it up; the id is
  * shown otherwise.
  * @param api The site's API connections, from {@link readUpstreams}; left out when absent or null.
+ * @param env The site's functions, from `readEnv`; left out when absent or null.
  * @returns The description.
  */
 export function describeSite(
 	site: SiteDetail,
 	folderPath?: string,
 	api: SiteUpstreams | null = null,
+	env: SiteEnv | null = null,
 ): string {
 	const unavailable = (available: boolean) => (available ? "" : " (not on this plan)");
 	const versions = site.deploys.slice(0, VERSIONS_LISTED).map((deploy) => {
@@ -139,6 +182,7 @@ export function describeSite(
 		`  folder    ${site.folderId === null ? "(top level)" : (folderPath ?? site.folderId)}`,
 		...addressLines(site),
 		...describeUpstreams(api),
+		...describeFunctions(env),
 		"",
 		site.deploys.length === 0 ? "No versions yet." : "Versions, newest first:",
 		...versions,

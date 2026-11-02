@@ -1477,3 +1477,122 @@ export async function removeUpstream(
 
 	return null;
 }
+
+/** One variable a site's functions read, as the API shows it: never its value. */
+export interface EnvVar {
+	/** The name, `OPENAI_API_KEY`. */
+	readonly name: string;
+	/** The value's last four characters, or empty for a short value. Never the value. */
+	readonly last4: string;
+	/** When its value last changed. */
+	readonly updatedAt: string;
+}
+
+/** A site's functions as the API describes them (docs/briefs/FUNCTIONS-BRIEF.md §4.5). */
+export interface SiteEnv {
+	/** The variables, by name. */
+	readonly vars: readonly EnvVar[];
+	/** Whether the site may run functions now; false, nothing can be set, but a variable can still be removed. */
+	readonly allowed: boolean;
+	/** Most variables a site may hold. */
+	readonly maxVars: number;
+	/** The live version's routes, in the order they are tried, each with the file that answers it. */
+	readonly routes: readonly { readonly pattern: string; readonly file: string | null }[];
+	/** Whether the live version holds `_functions/` that were left out because the site could not run them. */
+	readonly sourcesLeftOut: boolean;
+	/** Whether the platform switched this site's functions off. */
+	readonly blocked: boolean;
+	/** The account's function calls this month against its plan. */
+	readonly allowance: {
+		readonly sites: number;
+		readonly maxSites: number;
+		readonly callsThisMonth: number;
+		readonly maxCallsPerMonth: number;
+		readonly suspended: boolean;
+		readonly resetsAt: string;
+	};
+}
+
+/**
+ * Reads a site's functions: variables, live routes and the account's month.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @returns What the Functions tab shows.
+ * @throws Error with the API's wording — `functions_unavailable` while functions are not switched on.
+ */
+export async function listEnv(credentials: Credentials, siteId: string): Promise<SiteEnv> {
+	return call<SiteEnv>(credentials, `sites/${encodeURIComponent(siteId)}/env`);
+}
+
+/**
+ * Reads a site's functions for a description, or null when there is nothing to describe — the shape of
+ * {@link readUpstreams}: null where functions are not switched on (`functions_unavailable`), on any other
+ * failure, and on an answer of another shape, so the rest of the description still prints.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @returns The variables, routes and allowance, or null.
+ */
+export async function readEnv(credentials: Credentials, siteId: string): Promise<SiteEnv | null> {
+	try {
+		const env = await listEnv(credentials, siteId);
+
+		return Array.isArray(env.vars) &&
+			Array.isArray(env.routes) &&
+			typeof env.allowance?.maxCallsPerMonth === "number"
+			? env
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Sets a variable the site's functions read, adding it or replacing its value. The value is sent once, sealed
+ * by the server and never read back; it reaches every route within about a minute, without publishing again.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param name The name, uppercase letters, digits and underscores.
+ * @param value The value, in plain text.
+ * @returns The variable as the API now shows it.
+ */
+export async function setEnvVar(
+	credentials: Credentials,
+	siteId: string,
+	name: string,
+	value: string,
+): Promise<EnvVar> {
+	return call<EnvVar>(
+		credentials,
+		`sites/${encodeURIComponent(siteId)}/env/${encodeURIComponent(name)}`,
+		{ method: "PUT", body: JSON.stringify({ value }) },
+	);
+}
+
+/**
+ * Removes a variable from the site's functions, sealed value and all. Works whatever the plan, so a secret can
+ * always be taken back.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param name The name.
+ * @throws Error when the site has no variable of that name (`env_var_not_found`).
+ */
+export async function removeEnvVar(
+	credentials: Credentials,
+	siteId: string,
+	name: string,
+): Promise<void> {
+	// Answered with 204 and no body, which `call` would try to parse.
+	const response = await fetch(
+		`${credentials.apiBaseUrl}/sites/${encodeURIComponent(siteId)}/env/${encodeURIComponent(name)}`,
+		{
+			method: "DELETE",
+			headers: { ...credentials.headers, Authorization: `Bearer ${credentials.token}` },
+		},
+	);
+
+	if (!response.ok) throw await failureOf(response);
+}

@@ -1,5 +1,5 @@
 import { stat } from "node:fs/promises";
-import type { ProgressListener } from "@drop2run/core";
+import type { DeploySource, ProgressListener } from "@drop2run/core";
 import type { Credentials } from "./credentials.js";
 import { type NewSite, type PublishResult, publish } from "./publish.js";
 import { directorySource } from "./source.js";
@@ -24,6 +24,9 @@ import { directorySource } from "./source.js";
  * @param site Subdomain or site id, or undefined for a new site.
  * @param onProgress Receives every stage the engine reports. See {@link publish}.
  * @param newSite Name and folder for the site this creates. See {@link publish}.
+ * @param wrap Changes what is read before it is sent — the CLI bundles `_functions/` here. A hook rather than
+ *   the bundling itself, because the bundler is a dependency of the CLI alone (FUNCTIONS-BRIEF D6), and this
+ *   package is also the MCP server's.
  * @returns What to tell the caller.
  * @throws Error when the path does not exist or is not a directory.
  */
@@ -33,11 +36,18 @@ export async function publishDirectory(
 	site?: string,
 	onProgress?: ProgressListener,
 	newSite: NewSite = {},
+	wrap: (source: DeploySource, root: string) => DeploySource = (source) => source,
 ): Promise<PublishResult> {
 	const found = await stat(directory).catch(() => null);
 
 	if (found === null) throw new Error(`There is no folder at ${directory}.`);
 	if (!found.isDirectory()) throw new Error(`${directory} is a file, not a folder to publish.`);
 
-	return await publish(credentials, directorySource(directory), site, onProgress, newSite);
+	return await publish(
+		credentials,
+		wrap(directorySource(directory), directory),
+		site,
+		onProgress,
+		newSite,
+	);
 }
