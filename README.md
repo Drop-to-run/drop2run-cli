@@ -25,9 +25,12 @@ drop2run deploy dist
 ```
 
 `login` needs a browser on the same machine; `drop2run login --device` covers a remote shell, and CI
-uses a `DROP2RUN_TOKEN` from <https://app.dropto.run/account/tokens>. The other commands are `init`,
-`ls`, `open`, `rollback`, `rm`, `token list`, `whoami` and `where`, and `--json` on any of them
-prints machine-readable output.
+uses a `DROP2RUN_TOKEN` from <https://app.dropto.run/account/tokens>. The other commands include
+`init`, `ls`, `open`, `info`, `set` and `unset` (a site's settings, its API upstreams and the keys its
+functions read), `rollback`, `rm`, `comments`, `invite`, `token list`, `whoami` and `where`, and
+`--json` on any of them prints machine-readable output. `deploy` bundles a folder's `_functions/` —
+serverless functions, on the plans that include them — on your machine before uploading;
+`--no-bundle` skips that.
 
 The MCP server is registered with a client rather than run by hand. Claude for macOS and Windows
 installs it from a bundle — download [`drop2run.mcpb`](https://dropto.run/drop2run.mcpb) and open it,
@@ -69,15 +72,16 @@ Each package documents itself in full, including the sign-in flows and what happ
 
 | Package | Published | What it is |
 |---|---|---|
-| `packages/cli` | [`drop2run`](https://www.npmjs.com/package/drop2run) | The command line tool: `login`, `deploy`, `ls`, `rollback`, `rm` |
+| `packages/cli` | [`drop2run`](https://www.npmjs.com/package/drop2run) | The command line tool: `login`, `deploy`, `ls`, `set`, `rollback`, `rm`, `comments` |
 | `packages/mcp` | [`@drop2run/mcp`](https://www.npmjs.com/package/@drop2run/mcp) | An MCP server, so an agent can publish what it just wrote |
 | `packages/core` | no | The deploy engine — manifest, hashing, upload, go-live. No Node APIs, no browser APIs |
 | `packages/node` | no | The parts that need `fs`: reading a folder, the config file, the token store |
 
 `core` and `node` are not published. They are bundled into each package's `dist/` at build time, which
-is why `drop2run` installs with **no runtime dependencies at all** — an intentional choice for
-something that holds a token. `@drop2run/mcp` has two, both required by the protocol:
-`@modelcontextprotocol/sdk` and `zod`.
+is why `drop2run` installs with **one runtime dependency** — an intentional choice for something that
+holds a token. That one is `esbuild`, which bundles a site's `_functions/` on your machine and is
+loaded only when there is something to bundle. `@drop2run/mcp` has two, both required by the
+protocol: `@modelcontextprotocol/sdk` and `zod`.
 
 ## Building and testing
 

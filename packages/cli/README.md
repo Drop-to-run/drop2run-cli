@@ -16,7 +16,7 @@ documentation at [dropto.run/docs/cli](https://dropto.run/docs/cli).
 drop2run login [--device]                    Sign in and store a token
 drop2run logout                              Remove the stored token
 drop2run init [dir] [--site <subdomain>]     Tie this folder to a site
-drop2run deploy [dir] [--site <subdomain>]   Publish a folder
+drop2run deploy [dir] [--site <subdomain>]   Publish a folder, bundling _functions/ (--no-bundle to skip)
 drop2run init|deploy --subdomain <name>      Create a new site under a name you pick
 drop2run init|deploy --folder <path>         File the new site in one of your folders
 drop2run ls                                  List your sites
@@ -27,6 +27,8 @@ drop2run set <setting> <value> [--site X]    Change one setting
 drop2run unset name|password|expires         Clear a name, a password or a takedown
 drop2run set upstream <origin> [header]      Let /api/* routes call an API of yours (--methods GET,POST)
 drop2run unset upstream <origin> [header]    Remove an upstream and its keys, or one header
+drop2run set env <NAME> [--site X]           Set a key the site's functions read (typed or piped)
+drop2run unset env <NAME> [--site X]         Remove one
 drop2run pause [site]                        Take a site off the air, keeping its files
 drop2run resume [site]                       Put a paused site back on the air
 drop2run rollback <deployId> [--site X]      Put an earlier version back live
@@ -69,6 +71,29 @@ A header's value is never an argument — it is typed or piped in, one header pe
 again; `info` lists header names with the last four characters. Then point a `_redirects` line at the origin,
 such as `/api/* https://api.openai.com/:splat 200`. The rules are at
 [dropto.run/docs/redirects](https://dropto.run/docs/redirects#calling-your-own-api).
+
+## Functions
+
+On the Pro and Team plans, each `.js` or `.ts` file under `_functions/` in the folder is a serverless function
+answering the path it is named after — `_functions/api/hello.js` answers `/api/hello`:
+
+```js
+// _functions/api/hello.js
+export async function onRequestGet({ env }) {
+  return Response.json({ greeting: "hello", keySet: Boolean(env.API_KEY) });
+}
+```
+
+`deploy` bundles each route with what it imports, npm packages included, so run `npm install` first;
+`--no-bundle` publishes `_functions/` as it is. Keys go in variables, never in the files:
+
+```bash
+printf %s "$API_KEY" | drop2run set env API_KEY --site my-site   # or typed at a hidden prompt
+```
+
+A change reaches every route within about a minute without publishing again. On a plan without functions,
+`deploy` publishes the rest and warns that `_functions/` was left out. The rules are at
+[dropto.run/docs/functions](https://dropto.run/docs/functions).
 
 ## Comments
 

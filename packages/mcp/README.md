@@ -110,7 +110,7 @@ lose it.
 | `delete_site` | Deletes a site permanently, subdomain included — requires the subdomain repeated as `confirm` |
 | `change_subdomain` | Moves a site to a new subdomain; the old one keeps redirecting — requires the current subdomain as `confirm` |
 | `get_site` | Reads a site's settings, whether it is paused, and its versions with the live one marked |
-| `update_site` | Changes a site's name, serving mode, password, invite-only, comments, forms, scheduled takedown or folder, and the APIs its `/api/*` routes may call |
+| `update_site` | Changes a site's name, serving mode, password, invite-only, comments, forms, scheduled takedown or folder, the APIs its `/api/*` routes may call, and the keys its functions read |
 | `list_people` | Lists who a site is shared with, what each may do, and whether only they can open it |
 | `invite_people` | Invites addresses the person gave — to view, or to view and comment — and emails each one |
 | `remove_person` | Takes one address off a site's list |
@@ -152,6 +152,14 @@ with headers attached so the key stays off the page: `origin`, `headers` (`[{ na
 arrival and never shown again), `methods` (GET only unless opened), `removeHeaders`, or `remove: true`. A
 call needs a `_redirects` line ending in `200` that points at the origin. `get_site` reads it back as
 `apiProxy` — header names with the last four characters, never a value.
+
+On the Pro and Team plans, `.js` files under `_functions/` in what `publish_files` sends are serverless
+functions, each answering the path it is named after — a webhook, a call to an API with a key the page never
+sees. `publish_files` sends them as they are, without bundling, so a route that imports an npm package needs
+the CLI's `drop2run deploy`. `update_site`'s `env` sets the keys they read (`set: [{ name, value }]`,
+encrypted on arrival and never shown again; `remove: [names]`), and a change reaches every route within about
+a minute without publishing again. `get_site` reports the month's calls, each variable by name and last four
+characters, and the live routes. The rules are at [dropto.run/docs/functions](https://dropto.run/docs/functions).
 
 To share a site for review, `invite_people` puts the addresses the person gave on its list and emails each
 one; `update_site` with `invitedOnly: true` makes the list the only way in, and `comments` decides who may

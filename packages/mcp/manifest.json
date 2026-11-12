@@ -67,7 +67,7 @@
 		},
 		{
 			"name": "update_site",
-			"description": "Changes a site's name, serving mode, password, forms, scheduled takedown or folder."
+			"description": "Changes a site's settings: name, serving mode, password, invite-only, comments, forms, takedown, folder, API upstreams and function keys."
 		},
 		{
 			"name": "pause_site",
