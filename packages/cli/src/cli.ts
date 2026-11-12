@@ -17,7 +17,9 @@ import {
 	people,
 	remove,
 	rollback,
+	type StoreOptions,
 	set,
+	store,
 	tokens,
 	uninvite,
 	unset,
@@ -56,6 +58,12 @@ const HELP = `drop2run — publish a static site from the command line
   drop2run unset name|password|expires         Clear a name, a password or a takedown
   drop2run unset upstream <origin> [header]    Remove an upstream and its keys, or one header
   drop2run unset env <NAME>                    Remove a variable your functions read
+  drop2run store list [--prefix p]             List the keys a site's functions stored
+  drop2run store get|delete <key>              Print one value, or delete one key
+  drop2run store put <key> <value|@file>       Write one value
+  drop2run store export > store.json           Print the whole store as one JSON object
+  drop2run store import <file.json>            Write every key of such a file into the store
+  drop2run store wipe --confirm <subdomain>    Delete every key, for good
   drop2run pause [site]                        Take a site off the air, keeping its files
   drop2run resume [site]                       Put a paused site back on the air
   drop2run rollback <deployId> [--site X]      Put an earlier version back live
@@ -188,6 +196,8 @@ const VALUE_FLAGS = [
 	"--path",
 	"--role",
 	"--methods",
+	"--prefix",
+	"--confirm",
 ];
 
 /**
@@ -388,6 +398,7 @@ export async function run(commandLine: readonly string[]): Promise<CommandResult
 		flagValue(argv, "--role"),
 		methods,
 		!argv.includes("--no-bundle"),
+		{ prefix: flagValue(argv, "--prefix"), confirm: flagValue(argv, "--confirm") },
 	);
 
 	return json ? { ...result, text: JSON.stringify(result.json, null, 2) } : result;
@@ -410,6 +421,7 @@ export async function run(commandLine: readonly string[]): Promise<CommandResult
  * @param role Value of `--role`, which only `invite` reads.
  * @param methods Value of `--methods`, which only `set upstream` reads.
  * @param bundle False when `--no-bundle` was given, which only `deploy` reads.
+ * @param storeOptions `--prefix` and `--confirm`, which only `store` reads.
  * @returns The command's result.
  */
 async function dispatch(
@@ -425,6 +437,7 @@ async function dispatch(
 	role: string | undefined = undefined,
 	methods: string | undefined = undefined,
 	bundle = true,
+	storeOptions: StoreOptions = {},
 ): Promise<CommandResult> {
 	switch (command) {
 		case "login": {
@@ -475,6 +488,8 @@ async function dispatch(
 			});
 		case "unset":
 			return await unset(site, rest[0], rest.slice(1));
+		case "store":
+			return await store(site, rest[0], rest.slice(1), storeOptions);
 		case "pause":
 		case "resume":
 			return await pauseOrResume(command, rest[0] ?? site);

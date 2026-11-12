@@ -87,6 +87,11 @@ describe("the tool surface", () => {
 			"resolve_comment",
 			"resume_site",
 			"rollback_site",
+			"store_delete",
+			"store_export",
+			"store_get",
+			"store_list",
+			"store_put",
 			"update_site",
 		]);
 	});

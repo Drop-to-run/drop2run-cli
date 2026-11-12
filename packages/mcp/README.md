@@ -121,6 +121,14 @@ lose it.
 | `reply_comment` | Answers a comment thread as the site's owner; the reply shows under the owner's name and the thread's people are emailed |
 | `resolve_comment` | Marks a comment thread resolved |
 | `reopen_comment` | Opens a resolved comment thread again |
+| `store_list` | Lists the keys a site's [functions](https://dropto.run/docs/functions#store) stored, by prefix, with each value's size — never the values |
+| `store_get` | Reads one value of a site's store |
+| `store_put` | Writes one value, replacing any there was |
+| `store_delete` | Deletes one key |
+| `store_export` | Reads the whole store as one JSON object, cut after the last key that fits in one answer |
+
+There is no tool that empties a whole store: that is done on the dashboard's Store tab or with
+`drop2run store wipe`, behind the subdomain typed back.
 
 Both publish tools take an optional `site` — a subdomain or site id to publish over. Leave it out and a
 new site is created.

@@ -29,6 +29,12 @@ drop2run set upstream <origin> [header]      Let /api/* routes call an API of yo
 drop2run unset upstream <origin> [header]    Remove an upstream and its keys, or one header
 drop2run set env <NAME> [--site X]           Set a key the site's functions read (typed or piped)
 drop2run unset env <NAME> [--site X]         Remove one
+drop2run store list [--prefix p]             List the keys a site's functions stored
+drop2run store get|delete <key>              Print one value, or delete one key
+drop2run store put <key> <value|@file>       Write one value
+drop2run store export > store.json           Print the whole store as one JSON object
+drop2run store import <file.json>            Write every key of such a file into the store
+drop2run store wipe --confirm <subdomain>    Delete every key, for good
 drop2run pause [site]                        Take a site off the air, keeping its files
 drop2run resume [site]                       Put a paused site back on the air
 drop2run rollback <deployId> [--site X]      Put an earlier version back live

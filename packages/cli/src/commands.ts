@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
 	accessOf,
@@ -12,19 +13,24 @@ import {
 	createSite,
 	dashboardUrlFor,
 	deleteSite,
+	deleteStoreValue,
 	describeEdge,
 	describeMode,
 	describeSite,
 	exchange,
+	exportStore,
 	failureContext,
 	findSite,
 	getSite,
+	getStoreValue,
+	importStore,
 	invitePeople,
 	listComments,
 	listen,
 	listFolders,
 	listPeople,
 	listSites,
+	listStoreKeys,
 	listTokens,
 	loadCredentials,
 	missingCredentialsMessage,
@@ -37,6 +43,7 @@ import {
 	pollDevice,
 	promoteDeploy,
 	publishDirectory,
+	putStoreValue,
 	readEnv,
 	readProject,
 	readUpstreams,
@@ -61,6 +68,7 @@ import {
 	type Upstream,
 	updateSiteSettings,
 	waitForCallback,
+	wipeStore,
 	writeProject,
 } from "@drop2run/node";
 import { type Bundler, esbuildBundler, withBundledFunctions } from "./functions.js";
@@ -1792,4 +1800,139 @@ export function where(): CommandResult {
 		},
 		code: credentials === null ? 1 : 0,
 	};
+}
+
+/** What `drop2run store` reads from its flags. */
+export interface StoreOptions {
+	/** Value of `--prefix`, which only `store list` reads. */
+	readonly prefix?: string | undefined;
+	/** Value of `--confirm`, which only `store wipe` reads. */
+	readonly confirm?: string | undefined;
+}
+
+/** How `drop2run store` is used, for a refusal that names the right form. */
+const STORE_USAGE =
+	"`drop2run store list [--prefix p]`, `store get <key>`, `store put <key> <value|@file>`, `store delete <key>`, " +
+	"`store export > store.json`, `store import <file.json>` or `store wipe --confirm <subdomain>`";
+
+/**
+ * Reads and changes a site's store (docs/briefs/STORE-BRIEF.md §4.6): the keys its functions wrote, as the
+ * dashboard's Store tab shows them.
+ *
+ * Acts on --site, else the site in drop2run.json, as `set` and `unset` do. A value is printed as it is stored and
+ * never logged; `export` prints one JSON object, so `> store.json` keeps it and `import` takes it back.
+ *
+ * @param site Subdomain or site id, or undefined to use the project file.
+ * @param action `list`, `get`, `put`, `delete`, `export`, `import` or `wipe`.
+ * @param args The words after it.
+ * @param options `--prefix` and `--confirm`.
+ * @returns The result.
+ */
+export async function store(
+	site: string | undefined,
+	action: string | undefined,
+	args: readonly string[],
+	options: StoreOptions = {},
+): Promise<CommandResult> {
+	const actions = new Set(["list", "get", "put", "delete", "export", "import", "wipe"]);
+	if (action === undefined || !actions.has(action)) return failure(`Use ${STORE_USAGE}.`);
+
+	const found = credentialsOr();
+	if ("result" in found) return found.result;
+
+	const target = siteOr(site, `drop2run store ${action} --site <subdomain>`);
+	if ("result" in target) return target.result;
+
+	try {
+		const summary = await findSite(found.credentials, target.named);
+		const { credentials } = found;
+		const siteId = summary.siteId;
+
+		switch (action) {
+			case "list": {
+				const page = await listStoreKeys(credentials, siteId, options.prefix ?? "");
+				const rows = page.keys.map((key) => `${key.key}\t${key.size} B\t${key.updatedAt}`);
+				const more = page.cursor === null ? [] : ["… more keys; narrow it with --prefix."];
+				const head =
+					page.keys.length === 0
+						? [
+								`No keys in ${summary.subdomain}'s store${options.prefix ? ` start with ${options.prefix}` : ""}.`,
+							]
+						: [];
+				return { text: [...head, ...rows, ...more].join("\n"), json: page, code: 0 };
+			}
+			case "get": {
+				const key = args[0];
+				if (key === undefined) return failure("Name the key: `drop2run store get <key>`.");
+				const value = await getStoreValue(credentials, siteId, key);
+				return { text: value, json: { key, value }, code: 0 };
+			}
+			case "put": {
+				const [key, raw] = args;
+				if (key === undefined || raw === undefined) {
+					return failure(
+						"Give a key and a value: `drop2run store put <key> <value>`, or `@file` to read the value from a file.",
+					);
+				}
+				const value = raw.startsWith("@") ? await readFile(raw.slice(1), "utf8") : raw;
+				await putStoreValue(credentials, siteId, key, value);
+				return { text: `Stored ${key} on ${summary.subdomain}.`, json: { key }, code: 0 };
+			}
+			case "delete": {
+				const key = args[0];
+				if (key === undefined) return failure("Name the key: `drop2run store delete <key>`.");
+				await deleteStoreValue(credentials, siteId, key);
+				return {
+					text: `Deleted ${key} from ${summary.subdomain}.`,
+					json: { key, deleted: true },
+					code: 0,
+				};
+			}
+			case "export": {
+				const entries = await exportStore(credentials, siteId);
+				return { text: JSON.stringify(entries, null, 2), json: entries, code: 0 };
+			}
+			case "import": {
+				const file = args[0];
+				if (file === undefined)
+					return failure("Name the file: `drop2run store import <file.json>`.");
+				let entries: unknown;
+				try {
+					entries = JSON.parse(await readFile(file, "utf8"));
+				} catch {
+					return failure(
+						`${file} is not JSON. An import is one object of text values: { "key": "value" }.`,
+					);
+				}
+				if (
+					typeof entries !== "object" ||
+					entries === null ||
+					Array.isArray(entries) ||
+					!Object.values(entries).every((v) => typeof v === "string")
+				) {
+					return failure(
+						`${file} is not one object of text values: { "key": "value" }. Nothing was written.`,
+					);
+				}
+				const result = await importStore(credentials, siteId, entries as Record<string, string>);
+				const text =
+					result.stoppedAt === null
+						? `Imported ${result.imported} keys into ${summary.subdomain}.`
+						: `Imported ${result.imported} keys; the store filled up at ${result.stoppedAt}, and it and the keys after it were not written.`;
+				return { text, json: result, code: result.stoppedAt === null ? 0 : 1 };
+			}
+			default: {
+				// wipe
+				if (options.confirm === undefined) {
+					return failure(
+						`Emptying a store deletes every key for good. Confirm with the site's subdomain: \`drop2run store wipe --confirm ${summary.subdomain}\`.`,
+					);
+				}
+				await wipeStore(credentials, siteId, options.confirm);
+				return { text: `Emptied ${summary.subdomain}'s store.`, json: { wiped: true }, code: 0 };
+			}
+		}
+	} catch (error) {
+		return failureFrom(error);
+	}
 }

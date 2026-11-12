@@ -1680,3 +1680,87 @@ describe("set upstream and unset upstream", () => {
 		expect(seen).toContain("DELETE /api/sites/01J/upstreams/up1");
 	});
 });
+
+describe("store", () => {
+	/** A stand-in for the API: one site, and what the store routes answer. Records every request. */
+	function stubStore(seen: string[], answers: Record<string, unknown> = {}): void {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL, init?: RequestInit) => {
+				const url = new URL(String(input));
+				seen.push(
+					`${init?.method ?? "GET"} ${url.pathname}${url.search}${init?.body ? ` ${String(init.body)}` : ""}`,
+				);
+				if (url.pathname === "/api/sites") {
+					return Response.json({
+						sites: [
+							{
+								siteId: "01J",
+								subdomain: "guestbook",
+								url: "https://guestbook.dropto.live",
+								name: null,
+							},
+						],
+					});
+				}
+				const answer = answers[url.pathname];
+				return answer === undefined ? new Response(null, { status: 204 }) : Response.json(answer);
+			}),
+		);
+	}
+
+	it("lists keys by prefix, one per line, never a value", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const seen: string[] = [];
+		stubStore(seen, {
+			"/api/sites/01J/store/keys": {
+				keys: [{ key: "post:1:a", size: 5, updatedAt: "2026-11-12T00:00:00Z" }],
+				cursor: null,
+			},
+		});
+
+		const result = await run(["store", "list", "--prefix", "post:1:", "--site", "guestbook"]);
+
+		expect(result.code).toBe(0);
+		expect(result.text).toBe("post:1:a\t5 B\t2026-11-12T00:00:00Z");
+		expect(seen).toContain("GET /api/sites/01J/store/keys?prefix=post%3A1%3A");
+	});
+
+	it("puts a value read from a file, keeping its key in the body rather than the path", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const seen: string[] = [];
+		stubStore(seen, { "/api/sites/01J/store/value": { key: "a/b", size: 5 } });
+		const file = join(mkdtempSync(join(tmpdir(), "drop2run-store-")), "value.txt");
+		writeFileSync(file, "hello");
+
+		const result = await run(["store", "put", "a/b", `@${file}`, "--site", "guestbook"]);
+
+		expect(result.code).toBe(0);
+		expect(seen).toContain('PUT /api/sites/01J/store/value {"key":"a/b","value":"hello"}');
+	});
+
+	it("refuses to empty a store without the subdomain, and names it", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const seen: string[] = [];
+		stubStore(seen);
+
+		const result = await run(["store", "wipe", "--site", "guestbook"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("--confirm guestbook");
+		expect(seen.some((line) => line.includes("/store/wipe"))).toBe(false);
+	});
+
+	it("refuses an import file that is not an object of text values, before sending anything", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const seen: string[] = [];
+		stubStore(seen);
+		const file = join(mkdtempSync(join(tmpdir(), "drop2run-store-")), "bad.json");
+		writeFileSync(file, JSON.stringify({ a: 1 }));
+
+		const result = await run(["store", "import", file, "--site", "guestbook"]);
+
+		expect(result.code).toBe(1);
+		expect(seen.some((line) => line.includes("/store/import"))).toBe(false);
+	});
+});

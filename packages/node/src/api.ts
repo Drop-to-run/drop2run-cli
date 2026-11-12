@@ -1596,3 +1596,233 @@ export async function removeEnvVar(
 
 	if (!response.ok) throw await failureOf(response);
 }
+
+/** A site's store as `GET /sites/{siteId}/store` reports it (docs/briefs/STORE-BRIEF.md K14). */
+export interface StoreStatus {
+	/** Whether the site's plan includes a store and its functions may run. */
+	readonly allowed: boolean;
+	/** Whether there is a store to read: allowed now, or kept for 30 days after the plan stopped including it. */
+	readonly readable: boolean;
+	/** Whether keys may be added or changed now. */
+	readonly writable: boolean;
+	/** Whether the account's month of store operations is spent. */
+	readonly suspended: boolean;
+	/** Bytes the store holds, or null when it could not be asked. */
+	readonly bytes: number | null;
+	/** The site's ceiling in bytes. */
+	readonly maxBytes: number;
+	/** Store operations the account's sites made this month. */
+	readonly opsThisMonth: number;
+	/** The account's monthly allowance. */
+	readonly maxOpsPerMonth: number;
+	/** When the month's count starts again. */
+	readonly resetsAt: string;
+	/** When a store kept after its site lost the right to it is deleted, or null. */
+	readonly deletesAt: string | null;
+}
+
+/** One key of a store, never its value. */
+export interface StoreKey {
+	/** The key. */
+	readonly key: string;
+	/** Its value's size in UTF-8 bytes. */
+	readonly size: number;
+	/** When its value was last written. */
+	readonly updatedAt: string;
+}
+
+/** One page of keys. */
+export interface StoreKeysPage {
+	/** The keys, in key order. */
+	readonly keys: readonly StoreKey[];
+	/** Pass back for the next page; null after the last. */
+	readonly cursor: string | null;
+}
+
+/** What an import did. */
+export interface StoreImport {
+	/** How many keys were written. */
+	readonly imported: number;
+	/** The first key not written because the store was full, or null. */
+	readonly stoppedAt: string | null;
+}
+
+/**
+ * The path of a site's store routes, relative to the API base.
+ *
+ * @param siteId ULID of the site.
+ * @returns `sites/{siteId}/store`.
+ */
+function storePath(siteId: string): string {
+	return `sites/${encodeURIComponent(siteId)}/store`;
+}
+
+/**
+ * Sends a store request whose answer has no body (204).
+ *
+ * @param credentials Token and base URL.
+ * @param path The path below the API base.
+ * @param init Method and body.
+ * @throws Error the API's problem when it refused.
+ */
+async function storeNoContent(
+	credentials: Credentials,
+	path: string,
+	init: RequestInit,
+): Promise<void> {
+	const response = await fetch(`${credentials.apiBaseUrl}/${path}`, {
+		...init,
+		headers: {
+			...credentials.headers,
+			Authorization: `Bearer ${credentials.token}`,
+			...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
+		},
+	});
+	if (!response.ok) throw await failureOf(response);
+}
+
+/**
+ * Reads whether a site has a store, its bytes, and the account's month.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @returns The status.
+ */
+export async function getStoreStatus(
+	credentials: Credentials,
+	siteId: string,
+): Promise<StoreStatus> {
+	return call<StoreStatus>(credentials, storePath(siteId));
+}
+
+/**
+ * Lists one page of a store's keys, in key order.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param prefix Only keys starting with this; empty for every key.
+ * @param cursor The previous page's cursor, or null.
+ * @returns The page.
+ */
+export async function listStoreKeys(
+	credentials: Credentials,
+	siteId: string,
+	prefix = "",
+	cursor: string | null = null,
+): Promise<StoreKeysPage> {
+	const query = new URLSearchParams();
+	if (prefix !== "") query.set("prefix", prefix);
+	if (cursor !== null) query.set("cursor", cursor);
+	const suffix = query.size > 0 ? `?${query.toString()}` : "";
+	return call<StoreKeysPage>(credentials, `${storePath(siteId)}/keys${suffix}`);
+}
+
+/**
+ * Reads one value, exactly as stored.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param key The key.
+ * @returns The value.
+ * @throws Error `store_key_not_found` when the key has none.
+ */
+export async function getStoreValue(
+	credentials: Credentials,
+	siteId: string,
+	key: string,
+): Promise<string> {
+	const read = await call<{ value: string }>(
+		credentials,
+		`${storePath(siteId)}/value?key=${encodeURIComponent(key)}`,
+	);
+	return read.value;
+}
+
+/**
+ * Writes one value, replacing any there was.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param key The key.
+ * @param value The value.
+ */
+export async function putStoreValue(
+	credentials: Credentials,
+	siteId: string,
+	key: string,
+	value: string,
+): Promise<void> {
+	await call<unknown>(credentials, `${storePath(siteId)}/value`, {
+		method: "PUT",
+		body: JSON.stringify({ key, value }),
+	});
+}
+
+/**
+ * Deletes one key.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param key The key.
+ * @throws Error `store_key_not_found` when it had no value.
+ */
+export async function deleteStoreValue(
+	credentials: Credentials,
+	siteId: string,
+	key: string,
+): Promise<void> {
+	await storeNoContent(credentials, `${storePath(siteId)}/value?key=${encodeURIComponent(key)}`, {
+		method: "DELETE",
+	});
+}
+
+/**
+ * Downloads the whole store as one JSON object of keys and values.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @returns The keys and values.
+ */
+export async function exportStore(
+	credentials: Credentials,
+	siteId: string,
+): Promise<Record<string, string>> {
+	return call<Record<string, string>>(credentials, `${storePath(siteId)}/export`);
+}
+
+/**
+ * Imports one JSON object of keys and values, replacing existing keys and removing none.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param entries The keys and values.
+ * @returns How many were written, and where it stopped.
+ */
+export async function importStore(
+	credentials: Credentials,
+	siteId: string,
+	entries: Readonly<Record<string, string>>,
+): Promise<StoreImport> {
+	return call<StoreImport>(credentials, `${storePath(siteId)}/import`, {
+		method: "POST",
+		body: JSON.stringify(entries),
+	});
+}
+
+/**
+ * Deletes every key of the store, confirmed by the site's subdomain.
+ *
+ * @param credentials Token and base URL.
+ * @param siteId ULID of the site.
+ * @param confirm The subdomain, as the person typed it.
+ */
+export async function wipeStore(
+	credentials: Credentials,
+	siteId: string,
+	confirm: string,
+): Promise<void> {
+	await storeNoContent(credentials, `${storePath(siteId)}/wipe`, {
+		method: "POST",
+		body: JSON.stringify({ confirm }),
+	});
+}

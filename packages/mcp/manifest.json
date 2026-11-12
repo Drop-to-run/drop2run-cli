@@ -108,6 +108,26 @@
 		{
 			"name": "reopen_comment",
 			"description": "Opens a resolved comment thread on a site again."
+		},
+		{
+			"name": "store_list",
+			"description": "Lists the keys a site's functions stored, with each value's size, never the values."
+		},
+		{
+			"name": "store_get",
+			"description": "Reads one value of a site's store."
+		},
+		{
+			"name": "store_put",
+			"description": "Writes one value of a site's store, replacing any there was."
+		},
+		{
+			"name": "store_delete",
+			"description": "Deletes one key of a site's store."
+		},
+		{
+			"name": "store_export",
+			"description": "Reads a site's whole store as one JSON object, cut when it is too large for one answer."
 		}
 	],
 	"compatibility": {
