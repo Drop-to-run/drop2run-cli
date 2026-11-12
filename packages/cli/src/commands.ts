@@ -1808,6 +1808,18 @@ export interface StoreOptions {
 	readonly prefix?: string | undefined;
 	/** Value of `--confirm`, which only `store wipe` reads. */
 	readonly confirm?: string | undefined;
+	/** Value of `--cursor`, which only `store list` reads: the page after the one that printed it. */
+	readonly cursor?: string | undefined;
+}
+
+/**
+ * Quotes one word for a POSIX shell when it needs it, so a command printed for the person can be pasted back as is.
+ *
+ * @param word The word.
+ * @returns It as is when it holds nothing a shell reads, else in single quotes.
+ */
+function quoteArg(word: string): string {
+	return /^[A-Za-z0-9_:./@%+=,-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
 }
 
 /** How `drop2run store` is used, for a refusal that names the right form. */
@@ -1850,9 +1862,21 @@ export async function store(
 
 		switch (action) {
 			case "list": {
-				const page = await listStoreKeys(credentials, siteId, options.prefix ?? "");
+				const page = await listStoreKeys(
+					credentials,
+					siteId,
+					options.prefix ?? "",
+					options.cursor ?? null,
+				);
 				const rows = page.keys.map((key) => `${key.key}\t${key.size} B\t${key.updatedAt}`);
-				const more = page.cursor === null ? [] : ["… more keys; narrow it with --prefix."];
+				// A prefix does not always narrow it — every comment of one post shares one — so the next page is a
+				// command of its own, the same one with the cursor added.
+				const more =
+					page.cursor === null
+						? []
+						: [
+								`… more keys: drop2run store list${options.prefix ? ` --prefix ${quoteArg(options.prefix)}` : ""} --cursor ${quoteArg(page.cursor)}`,
+							];
 				const head =
 					page.keys.length === 0
 						? [
@@ -1874,7 +1898,19 @@ export async function store(
 						"Give a key and a value: `drop2run store put <key> <value>`, or `@file` to read the value from a file.",
 					);
 				}
-				const value = raw.startsWith("@") ? await readFile(raw.slice(1), "utf8") : raw;
+				// `@file` reads a file; `@@…` is a value that starts with one `@`, so no value is impossible to store.
+				let value = raw;
+				if (raw.startsWith("@@")) value = raw.slice(1);
+				else if (raw.startsWith("@")) {
+					const path = raw.slice(1);
+					try {
+						value = await readFile(path, "utf8");
+					} catch {
+						return failure(
+							`Cannot read ${path}. To store a value that starts with @, write it with two: @@${path}.`,
+						);
+					}
+				}
 				await putStoreValue(credentials, siteId, key, value);
 				return { text: `Stored ${key} on ${summary.subdomain}.`, json: { key }, code: 0 };
 			}
@@ -1896,9 +1932,15 @@ export async function store(
 				const file = args[0];
 				if (file === undefined)
 					return failure("Name the file: `drop2run store import <file.json>`.");
+				let text: string;
+				try {
+					text = await readFile(file, "utf8");
+				} catch {
+					return failure(`Cannot read ${file}.`);
+				}
 				let entries: unknown;
 				try {
-					entries = JSON.parse(await readFile(file, "utf8"));
+					entries = JSON.parse(text);
 				} catch {
 					return failure(
 						`${file} is not JSON. An import is one object of text values: { "key": "value" }.`,
@@ -1914,12 +1956,30 @@ export async function store(
 						`${file} is not one object of text values: { "key": "value" }. Nothing was written.`,
 					);
 				}
-				const result = await importStore(credentials, siteId, entries as Record<string, string>);
-				const text =
+				let result: Awaited<ReturnType<typeof importStore>>;
+				try {
+					result = await importStore(credentials, siteId, entries as Record<string, string>);
+				} catch (error) {
+					// A later batch failed after earlier ones were written: say how many, or the person is left
+					// guessing whether the store is as it was.
+					const written = (error as { extensions?: { imported?: unknown } }).extensions?.imported;
+					const failed = failureFrom(error);
+					return typeof written === "number" && written > 0
+						? {
+								...failed,
+								text: `${written} keys were written before it stopped. Importing the file again replaces them rather than doubling them.\n${failed.text}`,
+							}
+						: failed;
+				}
+				const why =
+					result.stoppedBecause === "store_rate_limited"
+						? "the site's store took its most operations for this hour"
+						: "the store filled up";
+				const done =
 					result.stoppedAt === null
 						? `Imported ${result.imported} keys into ${summary.subdomain}.`
-						: `Imported ${result.imported} keys; the store filled up at ${result.stoppedAt}, and it and the keys after it were not written.`;
-				return { text, json: result, code: result.stoppedAt === null ? 0 : 1 };
+						: `Imported ${result.imported} keys; ${why} at ${result.stoppedAt}, and it and the keys after it were not written. Importing the file again later replaces the keys already written.`;
+				return { text: done, json: result, code: result.stoppedAt === null ? 0 : 1 };
 			}
 			default: {
 				// wipe

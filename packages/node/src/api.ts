@@ -61,6 +61,11 @@ export type ApiFailure = Error & {
 	readonly code: string;
 	/** The id the API logged the request under, or null when the body had none. */
 	readonly traceId: string | null;
+	/**
+	 * The problem's other members, unread — a figure the refusal carries, such as how many keys an import wrote
+	 * before a later batch failed. Empty when the body was not a problem.
+	 */
+	readonly extensions: Readonly<Record<string, unknown>>;
 };
 
 /**
@@ -80,12 +85,22 @@ async function failureOf(response: Response): Promise<ApiFailure> {
 	const problem = (await response.json().catch(() => null)) as {
 		type?: unknown;
 		detail?: string;
+		[member: string]: unknown;
 	} | null;
+	const {
+		type: _type,
+		title: _title,
+		detail: _detail,
+		status: _status,
+		instance: _instance,
+		...extensions
+	} = problem ?? {};
 
 	return Object.assign(new Error(problem?.detail ?? `The API answered ${response.status}.`), {
 		status: response.status,
 		code: problemCode(problem?.type, response.status),
 		traceId: problemTraceId(problem),
+		extensions,
 	});
 }
 
@@ -1643,8 +1658,10 @@ export interface StoreKeysPage {
 export interface StoreImport {
 	/** How many keys were written. */
 	readonly imported: number;
-	/** The first key not written because the store was full, or null. */
+	/** The first key not written, or null when every key was. The keys before it are written. */
 	readonly stoppedAt: string | null;
+	/** Why: `store_full`, or `store_rate_limited` when the site's hour of store operations is spent; null when none. */
+	readonly stoppedBecause: string | null;
 }
 
 /**

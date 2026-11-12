@@ -127,7 +127,7 @@
 		},
 		{
 			"name": "store_export",
-			"description": "Reads a site's whole store as one JSON object, cut when it is too large for one answer."
+			"description": "Reads a site's store with its values a part at a time, with a cursor for the next part."
 		}
 	],
 	"compatibility": {

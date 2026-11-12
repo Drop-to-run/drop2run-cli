@@ -5,7 +5,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "../src/server.js";
-import { fitExport, STORE_ANSWER_MAX_CHARS } from "../src/tools.js";
+import { cutAt, fitEntries, STORE_ANSWER_MAX_CHARS } from "../src/tools.js";
 
 /**
  * The store tools (docs/briefs/STORE-BRIEF.md §4.6), driven through a real client against a stubbed API.
@@ -216,8 +216,45 @@ describe("the store tools", () => {
 		expect(seen).toContain("DELETE /api/sites/01J/store/value?key=a%2Fb");
 	});
 
-	it("exports a store whole when it fits, and says how many keys", async () => {
-		vi.stubGlobal("fetch", stubStore([], { "/api/sites/01J/store/export": { b: "2", a: "1" } }));
+	it("exports one page at a time, never downloading the whole store, and keeps a key named __proto__", async () => {
+		const seen: string[] = [];
+		const values: Record<string, string> = { __proto__: "x", a: "1" };
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL | Request) => {
+				const url = new URL(String(input));
+				seen.push(`${url.pathname}${url.search}`);
+				if (url.pathname === "/api/sites") {
+					return Response.json({
+						sites: [
+							{
+								siteId: "01J",
+								subdomain: "guestbook",
+								url: "https://guestbook.dropto.live",
+								name: null,
+							},
+						],
+					});
+				}
+				if (url.pathname.endsWith("/store/keys")) {
+					return Response.json({
+						keys: ["__proto__", "a"].map((key) => ({
+							key,
+							size: 1,
+							updatedAt: "2026-11-12T00:00:00Z",
+						})),
+						cursor: url.searchParams.has("cursor") ? null : "a",
+					});
+				}
+				const key = url.searchParams.get("key") ?? "";
+				return Response.json({
+					key,
+					value: Object.hasOwn(values, key) ? values[key] : null,
+					size: 1,
+				});
+			}),
+		);
+		Object.defineProperty(values, "__proto__", { value: "x", enumerable: true });
 
 		const result = await (await connect()).callTool({
 			name: "store_export",
@@ -225,11 +262,56 @@ describe("the store tools", () => {
 		});
 
 		expect(result.structuredContent).toEqual({
-			entries: { a: "1", b: "2" },
-			total: 2,
-			complete: true,
+			entries: [
+				{ key: "__proto__", value: "x" },
+				{ key: "a", value: "1" },
+			],
+			cursor: "a",
 		});
-		expect(textOf(result)).toContain("2 keys in guestbook's store.");
+		expect(textOf(result)).toContain('"__proto__": "x"');
+		expect(textOf(result)).toContain("pass cursor a");
+		expect(seen.some((line) => line.includes("/store/export"))).toBe(false);
+	});
+
+	it("passes the cursor back for the next part, and says when the store ends", async () => {
+		const seen: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL | Request) => {
+				const url = new URL(String(input));
+				seen.push(`${url.pathname}${url.search}`);
+				if (url.pathname === "/api/sites") {
+					return Response.json({
+						sites: [
+							{
+								siteId: "01J",
+								subdomain: "guestbook",
+								url: "https://guestbook.dropto.live",
+								name: null,
+							},
+						],
+					});
+				}
+				if (url.pathname.endsWith("/store/keys")) {
+					return Response.json({
+						keys: [{ key: "z", size: 1, updatedAt: "2026-11-12T00:00:00Z" }],
+						cursor: null,
+					});
+				}
+				return Response.json({ key: "z", value: "26", size: 2 });
+			}),
+		);
+
+		const result = await (await connect()).callTool({
+			name: "store_export",
+			arguments: { site: "guestbook", cursor: "a" },
+		});
+
+		expect(seen).toContain("/api/sites/01J/store/keys?cursor=a");
+		expect(result.structuredContent).toEqual({
+			entries: [{ key: "z", value: "26" }],
+			cursor: null,
+		});
 	});
 
 	it("passes the API's refusal through as an error the model can read", async () => {
@@ -269,28 +351,32 @@ describe("the store tools", () => {
 	});
 });
 
-describe("fitExport", () => {
-	it("keeps whole keys in key order and stops before the one that would pass the size", () => {
-		const all = { c: "333", a: "1", b: "22" };
+describe("fitEntries", () => {
+	it("keeps whole keys in the order given and stops before the one that would pass the size", () => {
+		const pairs: [string, string][] = [
+			["a", "1"],
+			["b", "22"],
+			["c", "333"],
+		];
 		const whole = JSON.stringify({ a: "1", b: "22", c: "333" }, null, 2).length;
 
-		expect(fitExport(all, whole)).toEqual({
-			entries: { a: "1", b: "22", c: "333" },
-			complete: true,
-			total: 3,
-		});
-		expect(fitExport(all, whole - 1)).toEqual({
-			entries: { a: "1", b: "22" },
-			complete: false,
-			total: 3,
-		});
+		expect(fitEntries(pairs, whole)).toEqual(pairs);
+		expect(fitEntries(pairs, whole - 1)).toEqual(pairs.slice(0, 2));
 	});
 
 	it("never goes over the size it was given", () => {
-		const all = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`k${i}`, "v".repeat(i)]));
-		const fitted = fitExport(all, 5_000);
+		const pairs = Array.from({ length: 500 }, (_, i): [string, string] => [`k${i}`, "v".repeat(i)]);
+		const fitted = fitEntries(pairs, 5_000);
 
-		expect(fitted.complete).toBe(false);
-		expect(JSON.stringify(fitted.entries, null, 2).length).toBeLessThanOrEqual(5_000);
+		expect(fitted.length).toBeLessThan(500);
+		expect(JSON.stringify(Object.fromEntries(fitted), null, 2).length).toBeLessThanOrEqual(5_000);
+	});
+});
+
+describe("cutAt", () => {
+	it("never leaves half of a character at the end", () => {
+		expect(cutAt("ab😀", 3)).toBe("ab");
+		expect(cutAt("ab😀", 4)).toBe("ab😀");
+		expect(cutAt("abc", 2)).toBe("ab");
 	});
 });

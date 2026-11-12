@@ -125,7 +125,7 @@ lose it.
 | `store_get` | Reads one value of a site's store |
 | `store_put` | Writes one value, replacing any there was |
 | `store_delete` | Deletes one key |
-| `store_export` | Reads the whole store as one JSON object, cut after the last key that fits in one answer |
+| `store_export` | Reads the store with its values a part at a time — up to 100 keys and one answer's worth — with a `cursor` for the next |
 
 There is no tool that empties a whole store: that is done on the dashboard's Store tab or with
 `drop2run store wipe`, behind the subdomain typed back.

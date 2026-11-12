@@ -47,7 +47,7 @@ Claude it is also listed in the
 tools come from `packages/mcp` here (`src/remote.ts`); the sign-in in front of them does not. It
 publishes text files only, and the setup is at [dropto.run/docs/mcp](https://dropto.run/docs/mcp).
 
-It exposes twenty tools, in five groups:
+It exposes twenty-five tools, in six groups:
 
 | Group | Tools |
 |---|---|
@@ -55,6 +55,7 @@ It exposes twenty tools, in five groups:
 | Sites | `list_sites`, `list_folders`, `get_site`, `update_site`, `pause_site`, `resume_site`, `rollback_site`, `change_subdomain`, `delete_site` |
 | Sharing | `list_people`, `invite_people`, `remove_person` |
 | Comments | `list_comments`, `reply_comment`, `resolve_comment`, `reopen_comment` |
+| Store | `store_list`, `store_get`, `store_put`, `store_delete`, `store_export` — what a site's functions keep; no tool empties a whole store |
 | Sign-in | `login`, `login_code` — local server only; the hosted copy signs in when it connects |
 
 The publishes answer with structured fields beside the sentence, so a URL does not have to be read back

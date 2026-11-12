@@ -1763,4 +1763,101 @@ describe("store", () => {
 		expect(result.code).toBe(1);
 		expect(seen.some((line) => line.includes("/store/import"))).toBe(false);
 	});
+
+	it("prints the next page as a command, and takes it back with --cursor", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const seen: string[] = [];
+		stubStore(seen, {
+			"/api/sites/01J/store/keys": {
+				keys: [{ key: "post:42:comment:1", size: 5, updatedAt: "2026-11-12T00:00:00Z" }],
+				cursor: "post:42:comment:1",
+			},
+		});
+
+		const first = await run(["store", "list", "--prefix", "post:42:", "--site", "guestbook"]);
+		expect(first.text).toContain(
+			"drop2run store list --prefix post:42: --cursor post:42:comment:1",
+		);
+
+		await run([
+			"store",
+			"list",
+			"--prefix",
+			"post:42:",
+			"--cursor",
+			"post:42:comment:1",
+			"--site",
+			"guestbook",
+		]);
+		expect(seen).toContain(
+			"GET /api/sites/01J/store/keys?prefix=post%3A42%3A&cursor=post%3A42%3Acomment%3A1",
+		);
+	});
+
+	it("stores a value that starts with @ when it is written with two, and names a file it cannot read", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		const seen: string[] = [];
+		stubStore(seen, { "/api/sites/01J/store/value": { key: "handle", size: 6 } });
+
+		expect((await run(["store", "put", "handle", "@@alice", "--site", "guestbook"])).code).toBe(0);
+		expect(seen).toContain('PUT /api/sites/01J/store/value {"key":"handle","value":"@alice"}');
+
+		const missing = await run(["store", "put", "handle", "@/no/such/file", "--site", "guestbook"]);
+		expect(missing.code).toBe(1);
+		expect(missing.text).toContain("Cannot read /no/such/file");
+		expect(missing.text).not.toContain("ENOENT");
+	});
+
+	it("says how many keys an import wrote before a later batch failed", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL) => {
+				const url = new URL(String(input));
+				if (url.pathname === "/api/sites") {
+					return Response.json({
+						sites: [
+							{
+								siteId: "01J",
+								subdomain: "guestbook",
+								url: "https://guestbook.dropto.live",
+								name: null,
+							},
+						],
+					});
+				}
+				return Response.json(
+					{ type: "store_error", detail: "The store did not answer. Try again.", imported: 1000 },
+					{ status: 503 },
+				);
+			}),
+		);
+		const file = join(mkdtempSync(join(tmpdir(), "drop2run-store-")), "store.json");
+		writeFileSync(file, JSON.stringify({ a: "1" }));
+
+		const result = await run(["store", "import", file, "--site", "guestbook"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("1000 keys were written before it stopped");
+		expect(result.text).toContain("The store did not answer");
+	});
+
+	it("says an import stopped at the hour's ceiling, not that the store is full", async () => {
+		process.env.DROP2RUN_TOKEN = "d2r_test";
+		stubStore([], {
+			"/api/sites/01J/store/import": {
+				imported: 4,
+				stoppedAt: "e",
+				stoppedBecause: "store_rate_limited",
+			},
+		});
+		const file = join(mkdtempSync(join(tmpdir(), "drop2run-store-")), "store.json");
+		writeFileSync(file, JSON.stringify({ a: "1", b: "2", c: "3", d: "4", e: "5" }));
+
+		const result = await run(["store", "import", file, "--site", "guestbook"]);
+
+		expect(result.code).toBe(1);
+		expect(result.text).toContain("most operations for this hour at e");
+		expect(result.text).not.toContain("filled up");
+	});
 });

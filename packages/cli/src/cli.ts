@@ -58,7 +58,7 @@ const HELP = `drop2run — publish a static site from the command line
   drop2run unset name|password|expires         Clear a name, a password or a takedown
   drop2run unset upstream <origin> [header]    Remove an upstream and its keys, or one header
   drop2run unset env <NAME>                    Remove a variable your functions read
-  drop2run store list [--prefix p]             List the keys a site's functions stored
+  drop2run store list [--prefix p] [--cursor c] List the keys a site's functions stored
   drop2run store get|delete <key>              Print one value, or delete one key
   drop2run store put <key> <value|@file>       Write one value
   drop2run store export > store.json           Print the whole store as one JSON object
@@ -198,6 +198,7 @@ const VALUE_FLAGS = [
 	"--methods",
 	"--prefix",
 	"--confirm",
+	"--cursor",
 ];
 
 /**
@@ -398,7 +399,11 @@ export async function run(commandLine: readonly string[]): Promise<CommandResult
 		flagValue(argv, "--role"),
 		methods,
 		!argv.includes("--no-bundle"),
-		{ prefix: flagValue(argv, "--prefix"), confirm: flagValue(argv, "--confirm") },
+		{
+			prefix: flagValue(argv, "--prefix"),
+			confirm: flagValue(argv, "--confirm"),
+			cursor: flagValue(argv, "--cursor"),
+		},
 	);
 
 	return json ? { ...result, text: JSON.stringify(result.json, null, 2) } : result;

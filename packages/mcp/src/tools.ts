@@ -9,7 +9,6 @@ import {
 	describeEdge,
 	describeMode,
 	describeSite,
-	exportStore,
 	failureContext,
 	findSite,
 	getSite,
@@ -2119,7 +2118,7 @@ function registerStoreTools(server: McpServer, context: ToolContext): void {
 				const found = await findSite(credentials, site);
 				const stored = await getStoreValue(credentials, found.siteId, key);
 				const truncated = stored.length > STORE_ANSWER_MAX_CHARS;
-				const value = truncated ? stored.slice(0, STORE_ANSWER_MAX_CHARS) : stored;
+				const value = truncated ? cutAt(stored, STORE_ANSWER_MAX_CHARS) : stored;
 				const cut = truncated
 					? `\n\n(Cut at ${STORE_ANSWER_MAX_CHARS} of ${stored.length} characters; the dashboard's Store tab or \`drop2run store get\` shows all of it.)`
 					: "";
@@ -2136,7 +2135,8 @@ function registerStoreTools(server: McpServer, context: ToolContext): void {
 				"Writes one value of a site's store, replacing any there was — the site's functions read it " +
 				"on their next call. Only when the person asked: a value they did not mean to change is gone. " +
 				"A value is text up to 64 KiB; refused while the store is full or the month's store " +
-				"operations are spent.",
+				"operations are spent. Never write back a value store_get answered with `truncated: true`: " +
+				"it is only the start of what is stored, and writing it would cut the rest off for good.",
 			inputSchema: {
 				site: SITE_INPUT,
 				key: STORE_KEY_INPUT,
@@ -2178,64 +2178,122 @@ function registerStoreTools(server: McpServer, context: ToolContext): void {
 		{
 			...titled("Export a site's store", READS_ONLY),
 			description:
-				"Reads a site's whole store as one JSON object of keys and values, in key order. A store " +
-				"too large for one answer is cut after the last key that fits, and says so; the dashboard's " +
-				`Store tab and \`drop2run store export\` download all of it. ${UNTRUSTED_STORE}`,
-			inputSchema: { site: SITE_INPUT },
+				"Reads a site's store with its values, in key order, a part at a time: up to " +
+				`${STORE_EXPORT_PAGE} keys, and no more than fits in one answer. When there is more, the answer ` +
+				"has a `cursor`; pass it back for the next part. Each key read counts as one of the month's " +
+				"store operations, so read the parts the person needs rather than the whole store; the " +
+				"dashboard's Store tab and `drop2run store export` download all of it at once. " +
+				UNTRUSTED_STORE,
+			inputSchema: {
+				site: SITE_INPUT,
+				cursor: z
+					.string()
+					.min(1)
+					.optional()
+					.describe("The previous answer's `cursor`, to read the part after it."),
+			},
 			outputSchema: {
-				entries: z.record(z.string(), z.string()).describe("Keys and their values."),
-				total: z.number().describe("How many keys the store holds."),
-				complete: z
-					.boolean()
-					.describe("Whether `entries` is every key, rather than the first that fit."),
+				entries: z
+					.array(z.object({ key: z.string(), value: z.string() }))
+					.describe("Keys and their values, in key order."),
+				cursor: z
+					.string()
+					.nullable()
+					.describe(
+						"Pass back for the next part; null when this part reached the end of the store.",
+					),
 			},
 		},
-		({ site }) =>
+		({ site, cursor }) =>
 			withCredentials(context, async (credentials) => {
 				const found = await findSite(credentials, site);
-				const all = await exportStore(credentials, found.siteId);
-				const { entries, complete, total } = fitExport(all, STORE_ANSWER_MAX_CHARS);
-				const json = JSON.stringify(entries, null, 2);
-				const note = complete
-					? `${total} keys in ${found.subdomain}'s store.`
-					: `The first ${Object.keys(entries).length} of ${total} keys in ${found.subdomain}'s store; the ` +
-						"rest did not fit in one answer. The dashboard's Store tab or `drop2run store export` " +
-						"downloads all of it.";
+				// One page of keys, then their values, a few at a time: never the whole store, which can be tens
+				// of megabytes — too much to hold in the remote server's Worker to answer with forty thousand
+				// characters of it.
+				const page = await listStoreKeys(credentials, found.siteId, "", cursor ?? null);
+				const pairs: [string, string][] = [];
+				for (let start = 0; start < page.keys.length; start += STORE_EXPORT_CONCURRENCY) {
+					const slice = page.keys.slice(start, start + STORE_EXPORT_CONCURRENCY);
+					const values = await Promise.all(
+						slice.map((entry) => getStoreValue(credentials, found.siteId, entry.key)),
+					);
+					for (const [i, entry] of slice.entries()) pairs.push([entry.key, values[i] ?? ""]);
+					if (fitEntries(pairs, STORE_ANSWER_MAX_CHARS).length < pairs.length) break;
+				}
 
-				return report(`${note}\n\n${json}`, { entries, total, complete });
+				const fitted = fitEntries(pairs, STORE_ANSWER_MAX_CHARS);
+				const tooLarge = fitted.length === 0 && pairs.length > 0 ? pairs[0]?.[0] : undefined;
+				// Where the next part starts: after the last key shown, after a key too large to show at all, or
+				// the page's own cursor when every key of it fitted.
+				const next =
+					tooLarge !== undefined
+						? tooLarge
+						: fitted.length < page.keys.length
+							? (fitted.at(-1)?.[0] ?? null)
+							: page.cursor;
+				const entries = fitted.map(([key, value]) => ({ key, value }));
+				const json = JSON.stringify(Object.fromEntries(fitted), null, 2);
+				const notes = [
+					entries.length === 0 && tooLarge === undefined
+						? `No keys in ${found.subdomain}'s store${cursor === undefined ? "" : " after that cursor"}.`
+						: `${entries.length} keys of ${found.subdomain}'s store.`,
+					...(tooLarge === undefined
+						? []
+						: [`The value of ${tooLarge} is too large for one answer; store_get reads its start.`]),
+					...(next === null ? [] : [`More keys: pass cursor ${next}.`]),
+				];
+
+				return report(`${notes.join(" ")}\n\n${json}`, { entries, cursor: next });
 			}),
 	);
 }
 
+/** Most keys one store_export answer reads: one page of the store's list, so one call is at most 101 operations. */
+export const STORE_EXPORT_PAGE = 100;
+
+/** How many values store_export asks for at once. */
+const STORE_EXPORT_CONCURRENCY = 8;
+
 /**
- * Keeps the keys of an export, in key order, while their JSON stays under a size.
+ * Cuts text to at most some UTF-16 units without splitting a character in two: a high surrogate left at the end
+ * would be half an emoji, which is not text any more.
+ *
+ * @param text The text.
+ * @param max Most units to keep.
+ * @returns The start of it.
+ */
+export function cutAt(text: string, max: number): string {
+	if (text.length <= max) return text;
+	const last = text.charCodeAt(max - 1);
+	return text.slice(0, last >= 0xd800 && last <= 0xdbff ? max - 1 : max);
+}
+
+/**
+ * Keeps the first keys of a part of a store, in the order given, while their JSON stays under a size.
  *
  * Whole keys or none: a value cut in half would read as a value, and the point of an export is that what
- * it shows is what is stored.
+ * it shows is what is stored. Pairs rather than an object, so a key named `__proto__` is a key like any other
+ * — assigned onto a plain object it would set the prototype and vanish from the answer.
  *
- * @param all Every key and value.
+ * @param pairs Keys and values, in key order.
  * @param maxChars How many characters the JSON may take.
  * @returns The keys that fit, whether that is all of them, and how many there were.
  */
-export function fitExport(
-	all: Readonly<Record<string, string>>,
+export function fitEntries(
+	pairs: readonly (readonly [string, string])[],
 	maxChars: number,
-): { entries: Record<string, string>; complete: boolean; total: number } {
-	// Sorted here because an object puts keys that look like integers ("1", "2") before the rest whatever
-	// order they arrived in, and the cut has to be the same keys every time.
-	const keys = Object.keys(all).sort();
-	const entries: Record<string, string> = {};
+): [string, string][] {
+	const kept: [string, string][] = [];
 	// Pretty-printed, each entry is `  "key": "value",\n`, and `{\n` and `}` take three more — less the comma
 	// the last entry does not have, so the count is exact rather than one over.
 	let used = 2;
 
-	for (const key of keys) {
-		const value = all[key] ?? "";
+	for (const [key, value] of pairs) {
 		const cost = JSON.stringify(key).length + JSON.stringify(value).length + 6;
-		if (used + cost > maxChars) return { entries, complete: false, total: keys.length };
-		entries[key] = value;
+		if (used + cost > maxChars) break;
+		kept.push([key, value]);
 		used += cost;
 	}
 
-	return { entries, complete: true, total: keys.length };
+	return kept;
 }
