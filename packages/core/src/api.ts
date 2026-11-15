@@ -381,7 +381,7 @@ async function request<T>(
 			throw new DeployError(
 				ClientErrorCode.NetworkFailed,
 				`The server did not answer within ${Math.round(timeoutMs / 1000)} seconds.`,
-				{ path, cause: describeError(error) },
+				{ why: "timeout", seconds: Math.round(timeoutMs / 1000), path, cause: describeError(error) },
 			);
 		}
 
@@ -390,6 +390,7 @@ async function request<T>(
 		// must not be mistaken for one, because that is the signal `complete` retries on.
 		if (error instanceof TypeError) {
 			throw new DeployError(ClientErrorCode.NetworkFailed, "Could not reach the server.", {
+				why: "unreachable",
 				path,
 				cause: describeError(error),
 			});
@@ -434,6 +435,7 @@ async function problemToError(response: Response): Promise<DeployError> {
 		return new DeployError(
 			`http_${response.status}`,
 			`The server responded with ${response.status}.`,
+			{ status: response.status },
 		);
 	}
 

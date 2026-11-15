@@ -372,7 +372,7 @@ export async function uploadAll(
 					const missing = new DeployError(
 						ClientErrorCode.UploadFailed,
 						`The server asked for ${ref.path}, which is not in the manifest.`,
-						{ path: ref.path },
+						{ why: "not_in_manifest", path: ref.path },
 					);
 					fail(missing);
 					throw missing;
@@ -521,7 +521,7 @@ async function uploadOne(
 				throw new DeployError(
 					ClientErrorCode.UploadFailed,
 					`Upload of ${target.path} was refused. The upload window may have expired — try deploying again.`,
-					{ path: target.path, status },
+					{ why: "refused", path: target.path, status },
 				);
 			}
 
@@ -533,7 +533,7 @@ async function uploadOne(
 				throw new DeployError(
 					ClientErrorCode.UploadFailed,
 					`${target.path} is too large to upload in one request. Make it smaller, or leave it out of this publish.`,
-					{ path: target.path, status },
+					{ why: "file_too_large", path: target.path, status },
 				);
 			}
 
@@ -554,6 +554,8 @@ async function uploadOne(
 			: `Could not upload ${target.path} after ${context.retries + 1} attempts.`;
 
 	throw new DeployError(ClientErrorCode.UploadFailed, message, {
+		why: lastError instanceof StalledError ? "stalled" : "gave_up",
+		attempts: context.retries + 1,
 		path: target.path,
 		cause: describeError(lastError),
 	});
@@ -634,7 +636,7 @@ async function uploadBatchOne(
 					throw new DeployError(
 						ClientErrorCode.ReadFailed,
 						`${path} changed after it was read, so it no longer matches what was checked. Drop the folder again.`,
-						{ path },
+						{ why: "changed", path },
 					);
 				}
 
@@ -648,7 +650,9 @@ async function uploadBatchOne(
 			// will not start working on a retry. Each says why, because the remedies differ.
 			if ([400, 401, 403, 411, 413, 429].includes(status)) {
 				throw new DeployError(ClientErrorCode.UploadFailed, refusalMessage(status, label), {
+					why: "batch_refused",
 					path: first,
+					more: members.length - 1,
 					status,
 				});
 			}
@@ -668,7 +672,10 @@ async function uploadBatchOne(
 			: `Could not upload ${label} after ${context.retries + 1} attempts.`;
 
 	throw new DeployError(ClientErrorCode.UploadFailed, message, {
+		why: lastError instanceof StalledError ? "batch_stalled" : "batch_gave_up",
+		attempts: context.retries + 1,
 		path: first,
+		more: members.length - 1,
 		cause: describeError(lastError),
 	});
 }
@@ -932,7 +939,7 @@ export function outOfMemory(detail?: string): DeployError {
 	return new DeployError(
 		ClientErrorCode.OutOfMemory,
 		"This browser ran out of memory reading what you dropped. Drop the unzipped folder instead, or try again in a desktop browser with fewer tabs open.",
-		detail,
+		detail === undefined ? undefined : { cause: detail },
 	);
 }
 
