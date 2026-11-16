@@ -302,6 +302,7 @@ export function checkLimits(files: readonly ManifestFile[], limits: PlanLimits |
 		throw new DeployError(
 			ClientErrorCode.Empty,
 			"That drop contained no files to deploy. Folders like .git and node_modules are skipped.",
+			{ why: "no_files" },
 		);
 	}
 
@@ -428,7 +429,7 @@ export function archiveRefusal(archive: SizedFile, limits: PlanLimits | null): D
 	return new DeployError(
 		ClientErrorCode.ZipTooLarge,
 		`${archive.path} is ${formatBytes(archive.size)} compressed, and this plan allows ${formatBytes(limits.maxSiteBytes)} per site.`,
-		{ limit: limits.maxSiteBytes, actual: archive.size },
+		{ why: "archive_size", path: archive.path, limit: limits.maxSiteBytes, actual: archive.size },
 	);
 }
 

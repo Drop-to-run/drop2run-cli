@@ -151,7 +151,7 @@ async function readForHash(file: CollectedFile): Promise<Uint8Array> {
 		throw new DeployError(
 			ClientErrorCode.ReadFailed,
 			`Could not read ${file.path}. It may have been moved, renamed or changed since you dropped it — drop the folder again.`,
-			{ path: file.path, cause: describeError(error) },
+			{ why: "unreadable", path: file.path, cause: describeError(error) },
 		);
 	}
 }
